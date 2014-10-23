@@ -1,5 +1,9 @@
 2014-10-23  Don Porter  <dgp@users.sourceforge.net>
 
+	* configure.in:
+	* README:	Advanced version number to 1.0.2.
+	* configure: 	TEA update; autoconf 2.68
+
 	* Makefile.in:	At some point docs we're written.  Put them in dist.
 
 	* doc/*.n: [TDBC Bug 00b792] OpenBSD friendly docs.
