@@ -1,3 +1,7 @@
+2014-10-23  Don Porter  <dgp@users.sourceforge.net>
+
+	* doc/*.n: [TDBC Bug 00b792] OpenBSD friendly docs.
+
 2012-11-08  Don Porter  <dgp@users.sourceforge.net>
 
 	* configure.in:
