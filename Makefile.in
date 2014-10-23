@@ -320,9 +320,8 @@ dist: dist-clean
 	chmod 664 $(DIST_DIR)/tclconfig/tcl.m4
 	chmod +x $(DIST_DIR)/tclconfig/install-sh
 
-#   Not written yet!
-#	mkdir $(DIST_DIR)/doc
-#	cp -p $(srcdir)/doc/tdbc_postgres.n $(DIST_DIR)/doc/
+	mkdir $(DIST_DIR)/doc
+	cp -p $(srcdir)/doc/tdbc_postgres.n $(DIST_DIR)/doc/
 
 	mkdir $(DIST_DIR)/generic
 	cp -p $(srcdir)/generic/fakepq.h $(srcdir)/generic/pqStubDefs.txt \
