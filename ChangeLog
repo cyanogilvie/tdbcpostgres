@@ -1,3 +1,7 @@
+*** Now that tdbcpostgres is under Fossil control, the ChangeLog is
+    no longer being maintained. Please refer to the change history at
+    http://core.tcl.tk/tdbcpostgres/timeline/
+
 2014-10-23  Don Porter  <dgp@users.sourceforge.net>
 
 	* configure.in:

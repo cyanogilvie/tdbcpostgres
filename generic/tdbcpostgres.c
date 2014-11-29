@@ -27,6 +27,9 @@
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
+#ifdef HAVE_SYS_TYPES_H
+#    include <sys/types.h>
+#endif
 
 #ifdef USE_NATIVE_POSTGRES
 #include <libpq-fe.h>
@@ -51,6 +54,31 @@ typedef short int16_t;
 
 #ifdef _MSC_VER
 #define snprintf _snprintf
+#endif
+
+/*
+ * Macros used to cast between pointers and integers (e.g. when storing an int
+ * in ClientData), on 64-bit architectures they avoid gcc warning about "cast
+ * to/from pointer from/to integer of different size".
+ */
+
+#if !defined(INT2PTR) && !defined(PTR2INT)
+#   if defined(HAVE_INTPTR_T) || defined(intptr_t)
+#	define INT2PTR(p) ((void *)(intptr_t)(p))
+#	define PTR2INT(p) ((int)(intptr_t)(p))
+#   else
+#	define INT2PTR(p) ((void *)(p))
+#	define PTR2INT(p) ((int)(p))
+#   endif
+#endif
+#if !defined(UINT2PTR) && !defined(PTR2UINT)
+#   if defined(HAVE_UINTPTR_T) || defined(uintptr_t)
+#	define UINT2PTR(p) ((void *)(uintptr_t)(p))
+#	define PTR2UINT(p) ((unsigned int)(uintptr_t)(p))
+#   else
+#	define UINT2PTR(p) ((void *)(p))
+#	define PTR2UINT(p) ((unsigned int)(p))
+#   endif
 #endif
 
 /* Static data contained within this file */
@@ -2095,15 +2123,15 @@ ResultDescToTcl(
 	    entry =
 		Tcl_CreateHashEntry(&names, fieldName, &new);
 	    while (!new) {
-		count = (int) Tcl_GetHashValue(entry);
+	        count = PTR2INT(Tcl_GetHashValue(entry));
 		++count;
-		Tcl_SetHashValue(entry, (ClientData) count);
+		Tcl_SetHashValue(entry, INT2PTR(count));
 		sprintf(numbuf, "#%d", count);
 		Tcl_AppendToObj(nameObj, numbuf, -1);
 		entry = Tcl_CreateHashEntry(&names, Tcl_GetString(nameObj),
 					    &new);
 	    }
-	    Tcl_SetHashValue(entry, (ClientData) count);
+	    Tcl_SetHashValue(entry, INT2PTR(count));
 	    Tcl_ListObjAppendElement(NULL, retval, nameObj);
 	    Tcl_DecrRefCount(nameObj);
 	}
@@ -2363,7 +2391,7 @@ StatementParamsMethod(
 	}
 	typeHashEntry =
 	    Tcl_FindHashEntry(&(pidata->typeNumHash),
-			      (const char*) (sdata->paramDataTypes[i]));
+			      INT2PTR(sdata->paramDataTypes[i]));
 	if (typeHashEntry != NULL) {
 	    dataTypeName = (Tcl_Obj*) Tcl_GetHashValue(typeHashEntry);
 	    Tcl_DictObjPut(NULL, paramDesc, literals[LIT_TYPE], dataTypeName);
@@ -2888,6 +2916,8 @@ ResultSetConstructor(
     ckfree((char*)paramValues);
     ckfree((char*)paramLengths);
     ckfree((char*)paramFormats);
+    ckfree((char*)paramNeedsFreeing);
+    ckfree((char*)paramTempObjs);
 
     return status;
     
@@ -2968,7 +2998,7 @@ ResultSetNextrowMethod(
     int objc, 			/* Parameter count */
     Tcl_Obj *const objv[]	/* Parameter vector */
 ) {
-    int lists = (int) clientData;
+    int lists = PTR2INT(clientData);
 
     Tcl_Object thisObject = Tcl_ObjectContextObject(context);
 				/* The current result set object */
@@ -3244,7 +3274,7 @@ Tdbcpostgres_Init(
 	int new;
 	Tcl_HashEntry* entry =
 	    Tcl_CreateHashEntry(&(pidata->typeNumHash), 
-				(const char*) (int) (dataTypes[i].oid),
+				INT2PTR(dataTypes[i].oid),
 				&new);
 	Tcl_Obj* nameObj = Tcl_NewStringObj(dataTypes[i].name, -1);
 	Tcl_IncrRefCount(nameObj);
@@ -3406,3 +3436,10 @@ DeletePerInterpData(
    Tcl_MutexUnlock(&pgMutex);
 
 }
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * End:
+ */
