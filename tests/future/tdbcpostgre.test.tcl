@@ -100,7 +100,7 @@ test tdbc::postgres-20.2 {direct value transfers} {*}{
 	$stmt paramtype xvarc1 varchar
 	$stmt paramtype xbin1 binary 20
 	$stmt paramtype xchar1 char 20
-    } 
+    }
     -body {
 	set trouble {}
 	set xtiny1 0x14

@@ -13,7 +13,7 @@
 #-----------------------------------------------------------------------------
 
 * STUBSTRUCT: pqStubs
-* LIBRARY: libpq
+* LIBRARY: pq
 
 const char* pg_encoding_to_char(int);
 void PQclear(PGresult*);

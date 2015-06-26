@@ -54,19 +54,6 @@ AC_DEFUN([TEAX_ADD_PRIVATE_HEADERS], [
 	TEAX_LAPPEND(PKG_PRIVATE_HEADERS, $i)])
     AC_SUBST(PKG_PRIVATE_HEADERS)])
 
-dnl Extra magic to make things work with Vista and VC
-AC_DEFUN([TEAX_VC_MANIFEST], [
-    ADD_MANIFEST=":"
-    AS_IF([test "$GCC" != yes \
-	    -a ${TEA_PLATFORM} == "windows" \
-	    -a "${SHARED_BUILD}" = "1"], [
-	# This refers to "Manifest Tool" not "Magnetic Tape utility"
-	AC_CHECK_PROGS(MT, mt, none)
-	AS_IF([test "$MT" != none], [
-	    ADD_MANIFEST="${MT} -nologo -manifest [\$]@.manifest -outputresource:[\$]@\;2"
-	    CLEANFILES="$CLEANFILES ${PKG_LIB_FILE}.manifest"])])
-    AC_SUBST(ADD_MANIFEST)])
-
 AC_DEFUN([TEAX_SDX], [
     AC_PATH_PROG(SDX, sdx, none)
     TEAX_IFEQ($SDX, none, [

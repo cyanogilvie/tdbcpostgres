@@ -4,7 +4,7 @@
  *	Stubs tables for the foreign PostgreSQL libraries so that
  *	Tcl extensions can use them without the linker's knowing about them.
  *
- * @CREATED@ 2011-04-12 02:23:01Z by genExtStubs.tcl from ../generic/pqStubDefs.txt
+ * @CREATED@ 2015-06-26 12:55:15Z by genExtStubs.tcl from ../generic/pqStubDefs.txt
  *
  * Copyright (c) 2010 by Kevin B. Kenny.
  *
@@ -26,26 +26,28 @@
  */
 
 /*
- * ABI version numbers of the PostgreSQL API that we can cope with.
- */
-
-static const char *const pqSuffixes[] = {
-    "", ".5", NULL
-};
-
-/*
  * Names of the libraries that might contain the PostgreSQL API
  */
 
+#if defined(__CYGWIN__) && !defined(LIBPREFIX)
+# define LIBPREFIX "cyg"
+#else
+# define LIBPREFIX "lib"
+#endif
+
 static const char *const pqStubLibNames[] = {
     /* @LIBNAMES@: DO NOT EDIT THESE NAMES */
-    "libpq", NULL
+    "pq", NULL
     /* @END@ */
 };
 
-/*
- * Names of the functions that we need from PostgreSQL
- */
+/* ABI Version numbers of the PostgreSQL API that we can cope with */
+
+static const char pqSuffixes[][4] = {
+    "", ".5"
+};
+
+/* Names of the functions that we need from PostgreSQL */
 
 static const char *const pqSymbolNames[] = {
     /* @SYMNAMES@: DO NOT EDIT THESE NAMES */
@@ -91,7 +93,7 @@ static const char *const pqSymbolNames[] = {
  */
 
 static pqStubDefs pqStubsTable;
-pqStubDefs* pqStubs = &pqStubsTable;
+const pqStubDefs* pqStubs = &pqStubsTable;
 
 /*
  *-----------------------------------------------------------------------------
@@ -130,23 +132,32 @@ PostgresqlInitStubs(Tcl_Interp* interp)
 
     status = TCL_ERROR;
     for (i = 0; status == TCL_ERROR && pqStubLibNames[i] != NULL; ++i) {
-	for (j = 0; status == TCL_ERROR && pqSuffixes[j] != NULL; ++j) {
-	    path = Tcl_NewStringObj(pqStubLibNames[i], -1);
+	for (j = 0; status == TCL_ERROR && (j < sizeof(pqSuffixes)/sizeof(pqSuffixes[0])); ++j) {
+	    path = Tcl_NewStringObj(LIBPREFIX, -1);
+	    Tcl_AppendToObj(path, pqStubLibNames[i], -1);
+#ifdef __CYGWIN__
+	    if (*pqSuffixes[j]) {
+		Tcl_AppendToObj(path, "-", -1);
+		Tcl_AppendToObj(path, pqSuffixes[j]+1, -1);
+	    }
+#endif
 	    Tcl_AppendObjToObj(path, shlibext);
+#ifndef __CYGWIN__
 	    Tcl_AppendToObj(path, pqSuffixes[j], -1);
+#endif
 	    Tcl_IncrRefCount(path);
 
 	    /* Try to load a client library and resolve symbols within it. */
 
 	    Tcl_ResetResult(interp);
 	    status = Tcl_LoadFile(interp, path, pqSymbolNames, 0,
-			      (void*)pqStubs, &handle);
+			      &pqStubsTable, &handle);
 	    Tcl_DecrRefCount(path);
 	}
     }
 
-    /* 
-     * Either we've successfully loaded a library (status == TCL_OK), 
+    /*
+     * Either we've successfully loaded a library (status == TCL_OK),
      * or we've run out of library names (in which case status==TCL_ERROR
      * and the error message reflects the last unsuccessful load attempt).
      */

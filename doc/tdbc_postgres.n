@@ -86,8 +86,8 @@ details of how to use the connection to manipulate a database.
 The \fBtdbc::postgres::connection create\fR object command supports the
 \fB-encoding\fR, \fB-isolation\fR, \fB-readonly\fR and \fB-timeout\fR
 options common to all TDBC drivers. The \fB-timeout\fR option will
-only affect connection process, once connected this value will be 
-ignored and cannot be changed after connecting. 
+only affect connection process, once connected this value will be
+ignored and cannot be changed after connecting.
 .PP
 In addition, the following options are recognized (these options must be
 set on the initial creation of the connection; they cannot be changed
@@ -95,8 +95,8 @@ after connecting) :
 .IP "\fB-host\fR \fIhostname\fR"
 Connects to the host specified by \fIhostname\fR. Default is to connect using a local Unix domain socket.
 .IP "\fB-hostaddr\fR \fIaddress\fR"
-Connects to the host specified by given IP \fIaddress\fR. If both \fB-host\fR and \fB-hostaddr\fR are given, the value 
-of \fB-host\fR is ignored. Default is to connect using a local Unix domain socket. 
+Connects to the host specified by given IP \fIaddress\fR. If both \fB-host\fR and \fB-hostaddr\fR are given, the value
+of \fB-host\fR is ignored. Default is to connect using a local Unix domain socket.
 .IP "\fB-port\fR \fInumber\fR"
 Connects to a Postgres server listening on the port specified by \fInumber\fR.
 It is used only when \fIhost\fR  or \fIhostaddr\fR is specified.
@@ -105,8 +105,8 @@ Presents \fIname\fR as the user name to the Postgres server. Default is the
 current user ID.
 .IP "\fB-passwd\fR \fIpassword\fR"
 .IP "\fB-password\fR \fIpassword\fR"
-These two options are synonymous. They present the given \fIpassword\fR as 
-the user's password to the Postgres server. Default is not to present a password. 
+These two options are synonymous. They present the given \fIpassword\fR as
+the user's password to the Postgres server. Default is not to present a password.
 .IP "\fB-database\fR \fIname\fR"
 .IP "\fB-db\fR \fIname\fR"
 These two options are synonymous.  They present the given \fIname\fR as the
@@ -121,13 +121,13 @@ output. This option is left for compatibility with older servers.
 This option determines whether or with what priority an SSL connection will be negotiated with
 the server. There are four \fImodes\fR: \fBdisable\fR will attempt only an unencrypted SSL connection;
 \fBallow\fR will negotiate, trying first a non-SSL connection, then if that fails, trying an SSL
-connection; \fBprefer\fR (the default) will negotiate, trying first an SSL connection, 
+connection; \fBprefer\fR (the default) will negotiate, trying first an SSL connection,
 then if that fails, trying a regular non-SSL connection; \fBrequire\fR will try only an SSL connection.
 If PostgreSQL is compiled without SSL support, using option \fBrequire\fR will cause an error,
 and options \fBallow\fR and \fBprefer\fR will be tolerated but the driver will be unable to negotiate
 an SSL connection.
 .IP \fB-requiressl\fR \fIflag\fR
-This option is deprecated in favor of the \fB-sslmode\fR setting. 
+This option is deprecated in favor of the \fB-sslmode\fR setting.
 The \fIflag\fR value must be a Boolean value. If it is \fBtrue\fR (or
 any equivalent), driver will then refuse to connect if the server does
 not accept an SSL connection. The default value is \fBfalse\fR (or any

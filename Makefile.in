@@ -15,13 +15,6 @@
 # RCS: @(#) $Id: Makefile.in,v 1.64 2007/10/23 22:08:06 hobbs Exp $
 
 #========================================================================
-# Add additional lines to handle any additional AC_SUBST cases that
-# have been added in a customized configure script.
-#========================================================================
-
-#SAMPLE_NEW_VAR	= @SAMPLE_NEW_VAR@
-
-#========================================================================
 # Nothing of the variables below this line should need to be changed.
 # Please check the TARGETS section below to make sure the make targets
 # are correct.
@@ -102,7 +95,6 @@ MAKE_LIB	= @MAKE_LIB@
 MAKE_SHARED_LIB	= @MAKE_SHARED_LIB@
 MAKE_STATIC_LIB	= @MAKE_STATIC_LIB@
 MAKE_STUB_LIB	= @MAKE_STUB_LIB@
-ADD_MANIFEST    = @ADD_MANIFEST@
 OBJEXT		= @OBJEXT@
 RANLIB		= @RANLIB@
 RANLIB_STUB	= @RANLIB_STUB@
@@ -133,7 +125,8 @@ TDBC_LIB_FILE	= @TDBC_LIB_FILE@
 EXTRA_PATH	= $(top_builddir):$(TCL_BIN_DIR)
 #EXTRA_PATH	= $(top_builddir):$(TCL_BIN_DIR):$(TK_BIN_DIR)
 TCLLIBPATH	= $(top_builddir)
-TCLSH_ENV	= TCL_LIBRARY=`@CYGPATH@ $(TCL_SRC_DIR)/library`
+TCLSH_ENV	= TCL_LIBRARY=`@CYGPATH@ $(TCL_SRC_DIR)/library` \
+		  TDBC_LIBRARY=`@CYGPATH@ @tdbc_LIBRARY_PATH@`
 PKG_ENV		= @LD_LIBRARY_PATH_VAR@="$(EXTRA_PATH):$(@LD_LIBRARY_PATH_VAR@)" \
 		  PATH="$(EXTRA_PATH):$(PATH)" \
 		  TCLLIBPATH="$(TCLLIBPATH)" \
@@ -148,13 +141,13 @@ TCLSH   	= $(PKG_ENV) $(TCLSH_ENV) $(TCLSH_PROG)
 
 SHARED_BUILD	= @SHARED_BUILD@
 
-INCLUDES	= @PKG_INCLUDES@ @TCL_INCLUDES@ 
+INCLUDES	= @PKG_INCLUDES@ @TCL_INCLUDES@
 # INCLUDES	= @PKG_INCLUDES@ @TCL_INCLUDES@ @TK_INCLUDES@ @TK_XINCLUDES@
 
 PKG_CFLAGS	= @PKG_CFLAGS@
 
 # TCL_DEFS is not strictly need here, but if you remove it, then you
-# must make sure that configure.in checks for the necessary components
+# must make sure that configure.ac checks for the necessary components
 # that your library may use.  TCL_DEFS can actually be a problem if
 # you do not compile with a similar machine setup as the Tcl core was
 # compiled with.
@@ -170,6 +163,9 @@ LIBS		= @PKG_LIBS@ @LIBS@
 AR		= @AR@
 CFLAGS		= @CFLAGS@
 COMPILE		= $(CC) $(DEFS) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
+
+VALGRIND		= valgrind
+VALGRINDARGS		= --tool=memcheck --num-callers=16 --leak-resolution=high --leak-check=yes --show-reachable=yes -v
 
 #========================================================================
 # Start of user-definable TARGETS section
@@ -264,7 +260,6 @@ depend:
 $(PKG_LIB_FILE): $(PKG_OBJECTS)
 	-rm -f $(PKG_LIB_FILE)
 	${MAKE_LIB}
-	$(ADD_MANIFEST)
 	$(RANLIB) $(PKG_LIB_FILE)
 
 #========================================================================
@@ -304,9 +299,9 @@ dist: dist-clean
 	mkdir -p $(DIST_DIR)
 	cp -p $(srcdir)/ChangeLog $(srcdir)/README* $(srcdir)/license* \
 		$(srcdir)/aclocal.m4 $(srcdir)/configure $(srcdir)/*.in \
-		$(DIST_DIR)/
+		$(srcdir)/configure.ac $(DIST_DIR)/
 	chmod 664 $(DIST_DIR)/Makefile.in $(DIST_DIR)/aclocal.m4
-	chmod 775 $(DIST_DIR)/configure $(DIST_DIR)/configure.in
+	chmod 775 $(DIST_DIR)/configure $(DIST_DIR)/configure.ac
 
 	for i in $(srcdir)/*.[ch]; do \
 	    if [ -f $$i ]; then \
@@ -361,10 +356,10 @@ genstubs: $(srcdir)/generic/pqStubDefs.txt
 
 #========================================================================
 # Don't modify the file to clean here.  Instead, set the "CLEANFILES"
-# variable in configure.in
+# variable in configure.ac
 #========================================================================
 
-clean:  
+clean:
 	-test -z "$(BINARIES)" || rm -f $(BINARIES)
 	-rm -f *.$(OBJEXT) core *.core
 	-test -z "$(CLEANFILES)" || rm -f $(CLEANFILES)
