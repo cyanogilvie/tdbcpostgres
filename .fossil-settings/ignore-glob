@@ -1,0 +1,14 @@
+config.log
+config.status
+Makefile
+pkgIndex.tcl
+win/Release_*
+win/Debug_*
+win/versions.vc
+*.a
+*.dll
+*.dylib
+*.exe
+*.o
+*.obj
+*.so
