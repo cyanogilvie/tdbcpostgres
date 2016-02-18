@@ -175,10 +175,10 @@ PROJECT = tdbcpostgres
 !endif
 # get project version from row AC_INIT([tdbcpostgres], ...)
 !if [echo DOTVERSION = \>> versions.vc] \
-   && [nmakehlp -V ..\configure.in AC_INIT >> versions.vc]
+   && [nmakehlp -V ..\configure.ac AC_INIT >> versions.vc]
 !endif
 !if [echo TCL_VERSION_REQ = \>> versions.vc] \
-   && [nmakehlp -V ..\configure.in TCL_VERSION_REQ >> versions.vc]
+   && [nmakehlp -V ..\configure.ac TCL_VERSION_REQ >> versions.vc]
 !endif
 !include "versions.vc"
 
