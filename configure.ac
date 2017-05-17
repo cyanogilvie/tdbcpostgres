@@ -172,6 +172,14 @@ TEA_CONFIG_CFLAGS
 TEA_ENABLE_SYMBOLS
 
 #--------------------------------------------------------------------
+# INT2PTR  / PTR2INT  need to know about  intptr_t.
+# UINT2PTR / PTR2UINT need to know about uintptr_t.
+#--------------------------------------------------------------------
+
+AC_TYPE_INTPTR_T
+#AC_TYPE_UINTPTR_T
+
+#--------------------------------------------------------------------
 # Everyone should be linking against the Tcl stub library.  If you
 # can't for some reason, remove this definition.  If you aren't using
 # stubs, you also need to modify the SHLIB_LD_LIBS setting below to
