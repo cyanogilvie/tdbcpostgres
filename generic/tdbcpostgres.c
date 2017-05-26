@@ -15,7 +15,7 @@
  */
 
 #ifdef _MSC_VER
-#define _CRT_SECURE_NO_DEPRECATE
+#  define _CRT_SECURE_NO_DEPRECATE
 #endif
 
 #include <tcl.h>
@@ -24,17 +24,21 @@
 
 #include <stdio.h>
 #include <string.h>
+
 #ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
-#ifdef HAVE_SYS_TYPES_H
-#    include <sys/types.h>
+#  include <stdint.h>
 #endif
 
+#ifdef HAVE_SYS_TYPES_H
+#  include <sys/types.h>
+#endif
+
+#include "int2ptr_ptr2int.h"
+
 #ifdef USE_NATIVE_POSTGRES
-#include <libpq-fe.h>
+#  include <libpq-fe.h>
 #else
-#include "fakepq.h"
+#  include "fakepq.h"
 #endif
 
 /* Include the files needed to locate htons() and htonl() */
@@ -42,25 +46,18 @@
 #ifdef _WIN32
 typedef int int32_t;
 typedef short int16_t;
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <winsock2.h>
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#  include <winsock2.h>
 #  ifdef _MSC_VER
-#   pragma comment (lib, "ws2_32")
+#    pragma comment (lib, "ws2_32")
 #  endif
 #else
-#include <netinet/in.h>
+#  include <netinet/in.h>
 #endif
 
 #ifdef _MSC_VER
-#define snprintf _snprintf
-#endif
-
-/*
- * PTR2INT/INT2PTR
- */
-#if defined(HAVE_STDINT_H) && defined(HAVE_INTPTR_T)
-#  include "intptr_t.h"
+#  define snprintf _snprintf
 #endif
 
 /* Static data contained within this file */
