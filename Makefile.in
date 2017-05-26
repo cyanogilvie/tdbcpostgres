@@ -290,41 +290,50 @@ COMPRESS	= tar zcvf $(PKG_DIR).tar.gz $(PKG_DIR)
 DIST_ROOT	= /tmp/dist
 DIST_DIR	= $(DIST_ROOT)/$(PKG_DIR)
 
+DIST_INSTALL_DATA	= ${INSTALL} -m 644
+DIST_INSTALL_SCRIPT	= ${INSTALL} -m 755
+
 dist-clean:
 	rm -rf $(DIST_DIR) $(DIST_ROOT)/$(PKG_DIR).tar.*
 
 dist: dist-clean
 	$(INSTALL_DATA_DIR) $(DIST_DIR)
-	$(INSTALL_DATA) $(srcdir)/license.terms \
+	$(DIST_INSTALL_DATA) $(srcdir)/license.terms \
 		$(srcdir)/ChangeLog $(srcdir)/README $(srcdir)/TODO \
 		$(srcdir)/aclocal.m4 $(srcdir)/configure.ac \
 		$(srcdir)/Makefile.in $(srcdir)/pkgIndex.tcl.in \
 		$(DIST_DIR)/
-	$(INSTALL_SCRIPT) $(srcdir)/configure $(DIST_DIR)/
+	$(DIST_INSTALL_SCRIPT) $(srcdir)/configure $(DIST_DIR)/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/tclconfig
-	$(INSTALL_DATA) $(srcdir)/tclconfig/tcl.m4 $(DIST_DIR)/tclconfig/
-	$(INSTALL_SCRIPT) $(srcdir)/tclconfig/install-sh $(DIST_DIR)/tclconfig/
+	$(DIST_INSTALL_DATA) $(srcdir)/tclconfig/ChangeLog \
+		$(srcdir)/tclconfig/README.txt $(srcdir)/tclconfig/tcl.m4 \
+		$(DIST_DIR)/tclconfig/
+	$(DIST_INSTALL_SCRIPT) $(srcdir)/tclconfig/install-sh $(DIST_DIR)/tclconfig/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/doc
-	cp -p $(srcdir)/doc/tdbc_postgres.n $(DIST_DIR)/doc/
+	$(DIST_INSTALL_DATA) $(srcdir)/doc/tdbc_postgres.n $(DIST_DIR)/doc/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/generic
-	$(INSTALL_DATA) $(srcdir)/generic/fakepq.h $(srcdir)/generic/pqStubDefs.txt \
+	$(DIST_INSTALL_DATA) $(srcdir)/generic/fakepq.h $(srcdir)/generic/pqStubDefs.txt \
 		$(srcdir)/generic/pqStubInit.c $(srcdir)/generic/pqStubs.h \
 		$(srcdir)/generic/tdbcpostgres.c \
 		$(srcdir)/generic/int2ptr_ptr2int.h \
 		$(DIST_DIR)/generic/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/library
-	$(INSTALL_DATA) $(srcdir)/library/tdbcpostgres.tcl $(DIST_DIR)/library/
+	$(DIST_INSTALL_DATA) $(srcdir)/library/tdbcpostgres.tcl $(DIST_DIR)/library/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/tests
-	$(INSTALL_DATA) $(srcdir)/tests/all.tcl $(srcdir)/tests/tdbcpostgres.test \
+	$(DIST_INSTALL_DATA) $(srcdir)/tests/all.tcl $(srcdir)/tests/tdbcpostgres.test \
 		$(DIST_DIR)/tests/
 
+	$(INSTALL_DATA_DIR) $(DIST_DIR)/tests/future
+	$(DIST_INSTALL_DATA) $(srcdir)/tests/future/tdbcpostgre.test.tcl \
+		$(DIST_DIR)/tests/future/
+
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/win
-	$(INSTALL_DATA) $(srcdir)/win/makefile.vc $(srcdir)/win/nmakehlp.c \
+	$(DIST_INSTALL_DATA) $(srcdir)/win/makefile.vc $(srcdir)/win/nmakehlp.c \
 		$(srcdir)/win/rules.vc $(DIST_DIR)/win/
 
 	(cd $(DIST_ROOT); $(COMPRESS);)
