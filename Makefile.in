@@ -308,8 +308,8 @@ dist: dist-clean
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/tclconfig
 	$(DIST_INSTALL_DATA) $(srcdir)/tclconfig/ChangeLog \
 		$(srcdir)/tclconfig/README.txt $(srcdir)/tclconfig/tcl.m4 \
+		$(srcdir)/tclconfig/install-sh \
 		$(DIST_DIR)/tclconfig/
-	$(DIST_INSTALL_SCRIPT) $(srcdir)/tclconfig/install-sh $(DIST_DIR)/tclconfig/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/doc
 	$(DIST_INSTALL_DATA) $(srcdir)/doc/tdbc_postgres.n $(DIST_DIR)/doc/
