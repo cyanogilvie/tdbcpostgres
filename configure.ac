@@ -66,6 +66,7 @@ if test -f "${tdbc_BIN_DIR}/Makefile" ; then
 fi
 AC_SUBST(tdbc_LIBRARY_PATH)
 AC_SUBST(TDBC_VERSION)
+AC_SUBST(tdbc_SRC_DIR)
 AC_SUBST(tdbc_BIN_DIR)
 AC_SUBST(TDBC_LIB_FILE)
 

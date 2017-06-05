@@ -109,6 +109,7 @@ TCL_SRC_DIR	= @TCL_SRC_DIR@
 #TK_SRC_DIR	= @TK_SRC_DIR@
 
 TDBC_VERSION	= @TDBC_VERSION@
+TDBC_SRC_DIR	= @tdbc_SRC_DIR@
 TDBC_BIN_DIR	= @tdbc_BIN_DIR@
 TDBC_LIB_FILE	= @TDBC_LIB_FILE@
 
@@ -342,12 +343,12 @@ dist: dist-clean
 # How to rebuild the package's stub table.
 #========================================================================
 
-genstubs: $(srcdir)/generic/pqStubDefs.txt
-	@echo $(TCLSH_PROGRAM) $(srcdir)/../tdbc/tools/genExtStubs.tcl \
+genstubs: $(TDBC_SRC_DIR)/tools/genExtStubs.tcl $(srcdir)/generic/pqStubDefs.txt
+	@echo $(TCLSH_PROGRAM) $(TDBC_SRC_DIR)/tools/genExtStubs.tcl \
 		$(srcdir)/generic/pqStubDefs.txt \
 		$(srcdir)/generic/pqStubs.h \
 		$(srcdir)/generic/pqStubInit.c
-	@$(TCLSH) $(srcdir)/../tdbc/tools/genExtStubs.tcl \
+	@$(TCLSH) $(TDBC_SRC_DIR)/tools/genExtStubs.tcl \
 		$(srcdir)/generic/pqStubDefs.txt \
 		$(srcdir)/generic/pqStubs.h \
 		$(srcdir)/generic/pqStubInit.c
