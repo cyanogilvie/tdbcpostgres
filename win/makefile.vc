@@ -18,7 +18,7 @@
 
 PROJECT = tdbcpostgres
 # Tcl 8.6 etc. compile with /DUNICODE. TDBC pre-nmake reform compiled
-# without -DUNICODE. Keep that behaviour for now. TBD
+# without -DUNICODE. Keep that behaviour.
 USE_WIDECHAR_API  = 0
 
 !include "rules-ext.vc"
@@ -37,9 +37,10 @@ PRJ_OBJS = \
 	$(TMP_DIR)\tdbcpostgres.obj \
 	$(TMP_DIR)\pqStubInit.obj
 
-PRJ_STUBOBJS = $(TMP_DIR)\pqStubInit.obj
+# Uncomment the following line if you want to build and install stubs
+# PRJ_STUBOBJS = $(TMP_DIR)\pqStubInit.obj
 
-PRJHEADERS = \
+PRJ_HEADERS = \
 	$(GENERICDIR)\fakepq.h \
 	$(GENERICDIR)\pqStubs.h
 
@@ -70,19 +71,12 @@ PRJ_INCLUDES	= -I"$(TDBC_GENERIC_DIR)"
 PRJ_LIBS  = $(TDBCSTUBLIB)
 !endif
 
-# Disable standard targets because we have custom test target
-DISABLE_STANDARD_TARGETS = 1
+# Disable standard test target because we have a custom one
+DISABLE_TARGET_test = 1
 !include "$(_RULESDIR)\targets.vc"
 
-setup: default-setup
-install: default-install default-install-stubs default-install-docs-n
-clean: default-clean
-realclean: hose
-hose: default-hose
-distclean: realclean default-distclean
-shell: default-shell
-
-$(PRJ_OBJS): $(PRJHEADERS)
+# Additional default actions for install
+install: default-install-docs-n
 
 # The TIP 477 generation of pkgIndex.tcl from pkgIndex.tcl.in does not include
 # all replacements below so define our own target.
