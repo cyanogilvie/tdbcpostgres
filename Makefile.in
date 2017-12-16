@@ -125,7 +125,7 @@ TDBC_LIB_FILE	= @TDBC_LIB_FILE@
 
 EXTRA_PATH	= $(top_builddir):$(TCL_BIN_DIR)
 #EXTRA_PATH	= $(top_builddir):$(TCL_BIN_DIR):$(TK_BIN_DIR)
-TCLLIBPATH	= $(top_builddir)
+TCLLIBPATH	= $(top_builddir) $(TDBC_BIN_DIR)
 TCLSH_ENV	= TCL_LIBRARY=`@CYGPATH@ $(TCL_SRC_DIR)/library` \
 		  TDBC_LIBRARY=`@CYGPATH@ @tdbc_LIBRARY_PATH@`
 PKG_ENV		= @LD_LIBRARY_PATH_VAR@="$(EXTRA_PATH):$(@LD_LIBRARY_PATH_VAR@)" \
@@ -234,9 +234,7 @@ install-doc: doc
 test: binaries libraries
 	$(TCLSH) `@CYGPATH@ $(srcdir)/tests/all.tcl` $(TESTFLAGS) \
 		-load "package ifneeded tdbc::postgres $(PACKAGE_VERSION) \
-			[list source `@CYGPATH@ $(srcdir)/library/tdbcpostgres.tcl`]\;[list load `@CYGPATH@ $(PKG_LIB_FILE)` $(PACKAGE_NAME)];\
-		package ifneeded tdbc ${TDBC_VERSION} \
-			[list source `@CYGPATH@ $(TDBC_BIN_DIR)/tdbc.tcl`]\;[list load `@CYGPATH@ $(TDBC_BIN_DIR)/$(TDBC_LIB_FILE)` tdbc]"
+			[list source `@CYGPATH@ $(srcdir)/library/tdbcpostgres.tcl`]\;[list load `@CYGPATH@ $(PKG_LIB_FILE)` $(PACKAGE_NAME)]"
 
 shell: binaries libraries
 	@$(TCLSH) $(SCRIPT)
