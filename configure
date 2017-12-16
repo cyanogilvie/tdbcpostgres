@@ -620,7 +620,6 @@ ac_includes_default="\
 
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
-CONFIGURE_OUTPUTS
 TCLSH_PROG
 VC_MANIFEST_EMBED_EXE
 VC_MANIFEST_EMBED_DLL
@@ -9523,9 +9522,6 @@ $as_echo "${TCLSH_PROG}" >&6; }
 # You may alternatively have a special pkgIndex.tcl.in or other files
 # which require substituting th AC variables in.  Include these here.
 #--------------------------------------------------------------------
-
-CONFIGURE_OUTPUTS="Makefile pkgIndex.tcl config.cache config.log config.status"
-
 
 ac_config_files="$ac_config_files Makefile pkgIndex.tcl"
 

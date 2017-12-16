@@ -220,7 +220,4 @@ TEA_PROG_TCLSH
 # which require substituting th AC variables in.  Include these here.
 #--------------------------------------------------------------------
 
-CONFIGURE_OUTPUTS="Makefile pkgIndex.tcl config.cache config.log config.status"
-AC_SUBST(CONFIGURE_OUTPUTS)
-
 AC_OUTPUT([Makefile pkgIndex.tcl])

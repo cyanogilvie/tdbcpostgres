@@ -156,7 +156,7 @@ PKG_CFLAGS	= @PKG_CFLAGS@
 DEFS		= @DEFS@ $(PKG_CFLAGS)
 
 # Move pkgIndex.tcl to 'BINARIES' var if it is generated in the Makefile
-CONFIGURE_OUTPUTS = @CONFIGURE_OUTPUTS@
+CONFIG_CLEAN_FILES = Makefile pkgIndex.tcl
 CLEANFILES	= @CLEANFILES@
 
 CPPFLAGS	= @CPPFLAGS@
@@ -369,7 +369,7 @@ clean:
 
 distclean: clean
 	-rm -f *.tab.c
-	-rm -f $(CONFIGURE_OUTPUTS)
+	-rm -f $(CONFIG_CLEAN_FILES)
 	-rm -f config.cache config.log config.status
 
 #========================================================================
