@@ -2430,26 +2430,16 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 #--------------------------------------------------------------------
 
 
-    # TEA extensions pass this us the version of TEA they think they
-    # are compatible with.
-    TEA_VERSION="3.10"
+    TEA_VERSION="3.12"
 
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for correct TEA configuration" >&5
-$as_echo_n "checking for correct TEA configuration... " >&6; }
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking TEA configuration" >&5
+$as_echo_n "checking TEA configuration... " >&6; }
     if test x"${PACKAGE_NAME}" = x ; then
 	as_fn_error $? "
 The PACKAGE_NAME variable must be defined by your TEA configure.ac" "$LINENO" 5
     fi
-    if test x"3.10" = x ; then
-	as_fn_error $? "
-TEA version not specified." "$LINENO" 5
-    elif test "3.10" != "${TEA_VERSION}" ; then
-	{ $as_echo "$as_me:${as_lineno-$LINENO}: result: warning: requested TEA version \"3.10\", have \"${TEA_VERSION}\"" >&5
-$as_echo "warning: requested TEA version \"3.10\", have \"${TEA_VERSION}\"" >&6; }
-    else
-	{ $as_echo "$as_me:${as_lineno-$LINENO}: result: ok (TEA ${TEA_VERSION})" >&5
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: ok (TEA ${TEA_VERSION})" >&5
 $as_echo "ok (TEA ${TEA_VERSION})" >&6; }
-    fi
 
     # If the user did not set CFLAGS, set it now to keep macros
     # like AC_PROG_CC and AC_TRY_COMPILE from adding "-g -O2".
@@ -4695,9 +4685,9 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
     INSTALL='$(SHELL) $(srcdir)/tclconfig/install-sh -c'
     INSTALL_DATA_DIR='${INSTALL} -d -m 755'
     INSTALL_DATA='${INSTALL} -m 644'
-    INSTALL_PROGRAM='${INSTALL}'
-    INSTALL_SCRIPT='${INSTALL}'
-    INSTALL_LIBRARY='${INSTALL_DATA}'
+    INSTALL_PROGRAM='${INSTALL} -m 755'
+    INSTALL_SCRIPT='${INSTALL} -m 755'
+    INSTALL_LIBRARY='${INSTALL} -m 644'
 
 
 
