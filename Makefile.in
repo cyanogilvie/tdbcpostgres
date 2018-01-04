@@ -307,9 +307,8 @@ dist: dist-clean
 	$(DIST_INSTALL_SCRIPT) $(srcdir)/configure $(DIST_DIR)/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/tclconfig
-	$(DIST_INSTALL_DATA) $(srcdir)/tclconfig/ChangeLog \
-		$(srcdir)/tclconfig/README.txt $(srcdir)/tclconfig/tcl.m4 \
-		$(srcdir)/tclconfig/install-sh \
+	$(DIST_INSTALL_DATA) $(srcdir)/tclconfig/README.txt \
+		$(srcdir)/tclconfig/tcl.m4 $(srcdir)/tclconfig/install-sh \
 		$(DIST_DIR)/tclconfig/
 
 	$(INSTALL_DATA_DIR) $(DIST_DIR)/doc
