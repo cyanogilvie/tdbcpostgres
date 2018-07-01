@@ -1,4 +1,4 @@
-# Package index file for tdbc::postgres
+# Index file to load the TDBC Postgres package.
 
 if {[catch {package require Tcl @TCL_VERSION_REQ@}]} {
     return
