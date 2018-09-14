@@ -1476,22 +1476,40 @@ ConnectionColumnsMethod(
     Tcl_Obj* retval;		/* List of table names */
     Tcl_Obj* attrs;		/* Attributes of the column */
     Tcl_Obj* name;		/* Name of a column */
+    Tcl_Obj** namev;		/* Table schema (optional) and table name. */
+    int namec;
     Tcl_DString ds, *dsPtr = &ds;
 
     /* Check parameters */
 
     if (objc < 3 || objc > 4) {
-	Tcl_WrongNumArgs(interp, 2, objv, "table ?pattern?");
+	Tcl_WrongNumArgs(interp, 2, objv, "{?schema? table} ?pattern?");
+	return TCL_ERROR;
+    }
+
+    if (Tcl_ListObjGetElements(interp, objv[2], &namec, &namev) != TCL_OK
+	|| namec < 1 || namec > 2) {
+	Tcl_WrongNumArgs(interp, 2, objv, "{?schema? table} ?pattern?");
 	return TCL_ERROR;
     }
 
     Tcl_DStringInit(dsPtr);
 
     /* Check if table exists by retreiving one row.
-     * The result wille be later used to determine column types (oids) */
+     * The result will be later used to determine column types (oids) */
     Tcl_DStringAppend(dsPtr, "SELECT * FROM ", -1);
-    AppendSQLIdentifier(dsPtr, objv[2]);
+    switch (namec) {
+    case 1:                  /* table_name */
+	AppendSQLIdentifier(dsPtr, namev[0]);
+	break;
+    case 2:                  /* table_schema.table_name */
+	AppendSQLIdentifier(dsPtr, namev[0]);
+	Tcl_DStringAppend(dsPtr, ".", 1);
+	AppendSQLIdentifier(dsPtr, namev[1]);
+	break;
+    }
     Tcl_DStringAppend(dsPtr, " LIMIT 0", -1);
+
 
     if (ExecSimpleQuery(interp, cdata->pgPtr, Tcl_DStringValue(dsPtr),
 			&resType) != TCL_OK) {
@@ -1509,10 +1527,21 @@ ConnectionColumnsMethod(
 	"  character_maximum_length,"
 	"  numeric_scale,"
 	"  is_nullable"
-	"  FROM information_schema.columns"
-	"  WHERE table_name=", -1);
-    AppendSQLStringConstant(dsPtr, objv[2]);
+	"  FROM information_schema.columns", -1);
 
+    switch (namec) {
+    case 1:
+	Tcl_DStringAppend(dsPtr, " WHERE table_name=", -1);
+	AppendSQLStringConstant(dsPtr, namev[0]);
+	break;
+    case 2:
+	Tcl_DStringAppend(dsPtr, " WHERE table_schema=", -1);
+	AppendSQLStringConstant(dsPtr, namev[0]);
+	Tcl_DStringAppend(dsPtr, " AND table_name=", -1);
+	AppendSQLStringConstant(dsPtr, namev[1]);
+	break;
+    }
+ 
     if (objc == 4) {
 	Tcl_DStringAppend(dsPtr, " AND column_name LIKE ", -1);
 	AppendSQLStringConstant(dsPtr, objv[3]);
@@ -1743,28 +1772,51 @@ ConnectionTablesMethod(
     char * field;		/* Field value from SQL result */
     Tcl_Obj* retval;		/* List of table names */
     int i;
+    Tcl_Obj** namev;		/* Optional schema name and table name pattern */
+    int namec;
     Tcl_DString ds, *dsPtr = &ds;
+    Tcl_Obj *schemanameObj = NULL;
+    Tcl_Obj *tablepatternObj = NULL;
 
     /* Check parameters */
 
     if (objc < 2 || objc > 3) {
-	Tcl_WrongNumArgs(interp, 2, objv, "");
+	Tcl_WrongNumArgs(interp, 2, objv, "?{?schemaname? pattern}?");
 	return TCL_ERROR;
+    }
+
+    if (objc == 3) {
+	if (Tcl_ListObjGetElements(interp, objv[2], &namec, &namev) != TCL_OK
+	    || namec < 1 || namec > 2) {
+	    Tcl_WrongNumArgs(interp, 2, objv, "?{?schemaname? pattern}?");
+	    return TCL_ERROR;
+	}
+	switch (namec) {
+	case 1:
+	    tablepatternObj = namev[0];
+	    break;
+	case 2:
+	    schemanameObj = namev[0];
+	    tablepatternObj = namev[1];
+	    break;
+	}
     }
 
     Tcl_DStringInit(dsPtr);
     Tcl_DStringAppend(dsPtr,
-		      "SELECT tablename"
-		      " FROM pg_tables"
-		      " WHERE  schemaname = 'public'",
+		      "SELECT tablename FROM pg_tables",
 		      -1); /* SQL query for table list */
 
-    if (objc == 3) {
+    if (schemanameObj) {
+	Tcl_DStringAppend(dsPtr, " WHERE schemaname=", -1);
+	AppendSQLStringConstant(dsPtr, schemanameObj);
+    } else {
+	Tcl_DStringAppend(dsPtr, " WHERE schemaname='public'", -1);
+    }
 
-	/* Pattern string is given */
-
-	Tcl_DStringAppend(dsPtr, " AND  tablename LIKE ", -1);
-	AppendSQLStringConstant(dsPtr, objv[2]);
+    if (tablepatternObj) {
+	Tcl_DStringAppend(dsPtr, " AND tablename LIKE ", -1);
+	AppendSQLStringConstant(dsPtr, tablepatternObj);
     }
 
     /* Retrieve the table list */
