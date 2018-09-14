@@ -7,6 +7,8 @@
  *
  * Copyright (c) 2009 by Slawomir Cygan.
  * Copyright (c) 2010 by Kevin B. Kenny.
+ * Copyright (c) 2018 by Patzschke + Rasp Software Gmbh (https://www.prs.de),
+ *                       Adrián Medraño Calvo <adrian@medranocalvo.com>.
  *
  * Please refer to the file, 'license.terms' for the conditions on
  * redistribution of this file and for a DISCLAIMER OF ALL WARRANTIES.
