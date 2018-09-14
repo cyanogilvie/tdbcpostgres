@@ -400,6 +400,9 @@ enum IsolationLevel {
 
 /* Static functions defined within this file */
 
+static void AppendSQLStringConstant(Tcl_DString *dsPtr, Tcl_Obj *stringObj);
+static void AppendSQLIdentifier(Tcl_DString *dsPtr, Tcl_Obj *stringObj);
+
 static int DeterminePostgresMajorVersion(Tcl_Interp* interp,
 					 ConnectionData* cdata,
 					 int* versionPtr);
@@ -1471,10 +1474,7 @@ ConnectionColumnsMethod(
     Tcl_Obj* retval;		/* List of table names */
     Tcl_Obj* attrs;		/* Attributes of the column */
     Tcl_Obj* name;		/* Name of a column */
-    Tcl_Obj* sqlQuery = Tcl_NewStringObj("SELECT * FROM ", -1);
-				/* Query used */
-
-    Tcl_IncrRefCount(sqlQuery);
+    Tcl_DString ds, *dsPtr = &ds;
 
     /* Check parameters */
 
@@ -1483,40 +1483,42 @@ ConnectionColumnsMethod(
 	return TCL_ERROR;
     }
 
+    Tcl_DStringInit(dsPtr);
+
     /* Check if table exists by retreiving one row.
      * The result wille be later used to determine column types (oids) */
-    Tcl_AppendObjToObj(sqlQuery, objv[2]);
+    Tcl_DStringAppend(dsPtr, "SELECT * FROM ", -1);
+    AppendSQLIdentifier(dsPtr, objv[2]);
+    Tcl_DStringAppend(dsPtr, " LIMIT 0", -1);
 
-    if (ExecSimpleQuery(interp, cdata->pgPtr, Tcl_GetString(sqlQuery),
+    if (ExecSimpleQuery(interp, cdata->pgPtr, Tcl_DStringValue(dsPtr),
 			&resType) != TCL_OK) {
-        Tcl_DecrRefCount(sqlQuery);
+	Tcl_DStringFree(dsPtr);
 	return TCL_ERROR;
     }
 
-    Tcl_DecrRefCount(sqlQuery);
+    Tcl_DStringSetLength(dsPtr, 0);
 
     /* Retreive column attributes */
 
-    sqlQuery = Tcl_NewStringObj("SELECT "
+    Tcl_DStringAppend(dsPtr, "SELECT "
 	"  column_name,"
 	"  numeric_precision,"
 	"  character_maximum_length,"
 	"  numeric_scale,"
 	"  is_nullable"
 	"  FROM information_schema.columns"
-	"  WHERE table_name='", -1);
-    Tcl_IncrRefCount(sqlQuery);
-    Tcl_AppendObjToObj(sqlQuery, objv[2]);
+	"  WHERE table_name=", -1);
+    AppendSQLStringConstant(dsPtr, objv[2]);
 
     if (objc == 4) {
-	Tcl_AppendToObj(sqlQuery,"' AND column_name LIKE '", -1);
-	Tcl_AppendObjToObj(sqlQuery, objv[3]);
+	Tcl_DStringAppend(dsPtr, " AND column_name LIKE ", -1);
+	AppendSQLStringConstant(dsPtr, objv[3]);
     }
-    Tcl_AppendToObj(sqlQuery,"'", -1);
 
     if (ExecSimpleQuery(interp, cdata->pgPtr,
-			Tcl_GetString(sqlQuery), &res) != TCL_OK) {
-        Tcl_DecrRefCount(sqlQuery);
+			Tcl_DStringValue(dsPtr), &res) != TCL_OK) {
+	Tcl_DStringFree(dsPtr);
 	PQclear(resType);
 	return TCL_ERROR;
     } else {
@@ -1583,7 +1585,7 @@ ConnectionColumnsMethod(
 	    Tcl_DictObjPut(NULL, retval, name, attrs);
 	}
 
-	Tcl_DecrRefCount(sqlQuery);
+	Tcl_DStringFree(dsPtr);
 	Tcl_SetObjResult(interp, retval);
 	Tcl_DecrRefCount(retval);
 	PQclear(resType);
@@ -1738,13 +1740,8 @@ ConnectionTablesMethod(
     PGresult* res;		/* Result of libpq call */
     char * field;		/* Field value from SQL result */
     Tcl_Obj* retval;		/* List of table names */
-    Tcl_Obj* sqlQuery = Tcl_NewStringObj("SELECT tablename"
-					 " FROM pg_tables"
-					 " WHERE  schemaname = 'public'",
-					 -1);
-				/* SQL query for table list */
     int i;
-    Tcl_IncrRefCount(sqlQuery);
+    Tcl_DString ds, *dsPtr = &ds;
 
     /* Check parameters */
 
@@ -1753,23 +1750,29 @@ ConnectionTablesMethod(
 	return TCL_ERROR;
     }
 
+    Tcl_DStringInit(dsPtr);
+    Tcl_DStringAppend(dsPtr,
+		      "SELECT tablename"
+		      " FROM pg_tables"
+		      " WHERE  schemaname = 'public'",
+		      -1); /* SQL query for table list */
+
     if (objc == 3) {
 
 	/* Pattern string is given */
 
-	Tcl_AppendToObj(sqlQuery, " AND  tablename LIKE '", -1);
-	Tcl_AppendObjToObj(sqlQuery, objv[2]);
-	Tcl_AppendToObj(sqlQuery, "'", -1);
+	Tcl_DStringAppend(dsPtr, " AND  tablename LIKE ", -1);
+	AppendSQLStringConstant(dsPtr, objv[2]);
     }
 
     /* Retrieve the table list */
 
-    if (ExecSimpleQuery(interp, cdata ->pgPtr, Tcl_GetString(sqlQuery),
+    if (ExecSimpleQuery(interp, cdata ->pgPtr, Tcl_DStringValue(dsPtr),
 			&res) != TCL_OK) {
-	Tcl_DecrRefCount(sqlQuery);
+	Tcl_DStringFree(dsPtr);
 	return TCL_ERROR;
     }
-    Tcl_DecrRefCount(sqlQuery);
+    Tcl_DStringFree(dsPtr);
 
     /* Iterate through the tuples and make the Tcl result */
 
@@ -3415,6 +3418,45 @@ DeletePerInterpData(
    Tcl_MutexUnlock(&pgMutex);
 
 }
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * AppendSQLDelimited --
+ *
+ *	Convert a string into a safe delimited string and append it to the
+ *	dynamic string.
+ *
+ *-----------------------------------------------------------------------------
+ */
+static void
+AppendSQLDelimited(Tcl_DString *dsPtr, Tcl_Obj *stringObj, char delimiter) {
+    int b, e;
+    int len = 0;
+    char *str = Tcl_GetStringFromObj(stringObj, &len);
+    Tcl_DStringAppend(dsPtr, &delimiter, 1);
+    for (b = 0, e = 0; e < len; e++) {
+	if (str[e] == delimiter) {
+	    Tcl_DStringAppend(dsPtr, &str[b], e - b);
+	    Tcl_DStringAppend(dsPtr, &delimiter, 1);
+	    Tcl_DStringAppend(dsPtr, &delimiter, 1);
+	    b = e+1;
+	}
+    }
+    Tcl_DStringAppend(dsPtr, &str[b], e - b);
+    Tcl_DStringAppend(dsPtr, &delimiter, 1);
+}
+
+static void
+AppendSQLStringConstant(Tcl_DString *dsPtr, Tcl_Obj *stringObj) {
+    AppendSQLDelimited(dsPtr, stringObj, '\'');
+}
+
+static void
+AppendSQLIdentifier(Tcl_DString *dsPtr, Tcl_Obj *stringObj) {
+    AppendSQLDelimited(dsPtr, stringObj, '"');
+}
+
 
 /*
  * Local Variables:
