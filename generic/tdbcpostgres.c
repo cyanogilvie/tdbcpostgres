@@ -787,7 +787,7 @@ TransferPostgresError(
 			     Tcl_NewStringObj("HY000", -1));
     Tcl_ListObjAppendElement(NULL, errorCode, Tcl_NewStringObj("POSTGRES", -1));
     Tcl_ListObjAppendElement(NULL, errorCode,
-			     Tcl_NewIntObj(-1));
+			     Tcl_NewWideIntObj(-1));
     Tcl_SetObjErrorCode(interp, errorCode);
     Tcl_SetObjResult(interp, Tcl_NewStringObj(PQerrorMessage(pgPtr), -1));
 }
@@ -838,7 +838,7 @@ static int TransferResultError(
 	Tcl_ListObjAppendElement(NULL, errorCode,
 				 Tcl_NewStringObj("POSTGRES", -1));
 	Tcl_ListObjAppendElement(NULL, errorCode,
-		Tcl_NewIntObj(error));
+		Tcl_NewWideIntObj(error));
 	Tcl_SetObjErrorCode(interp, errorCode);
 	if (error == PGRES_EMPTY_QUERY) {
 	    Tcl_SetObjResult(interp, Tcl_NewStringObj("empty query", -1));
@@ -1135,8 +1135,8 @@ ConfigureConnection(
 	    encoding = Tcl_GetString(objv[i+1]);
 	    break;
 	case TYPE_ISOLATION:
-	    if (Tcl_GetIndexFromObj(interp, objv[i+1], TclIsolationLevels,
-				    "isolation level", TCL_EXACT, &isolation)
+	    if (Tcl_GetIndexFromObjStruct(interp, objv[i+1], TclIsolationLevels,
+				    sizeof(char *), "isolation level", TCL_EXACT, &isolation)
 		!= TCL_OK) {
 		return TCL_ERROR;
 	    }
@@ -1578,7 +1578,7 @@ ConnectionColumnsMethod(
 	    /* 4 is is_nullable column number */
 
 	    Tcl_DictObjPut(NULL, attrs, literals[LIT_NULLABLE],
-		    Tcl_NewIntObj(strcmp("YES",
+		    Tcl_NewWideIntObj(strcmp("YES",
 			    PQgetvalue(res, i, 4)) == 0));
 	    Tcl_DictObjPut(NULL, retval, name, attrs);
 	}
@@ -2376,9 +2376,9 @@ StatementParamsMethod(
 	    Tcl_DictObjPut(NULL, paramDesc, literals[LIT_TYPE], dataTypeName);
 	}
 	Tcl_DictObjPut(NULL, paramDesc, literals[LIT_PRECISION],
-		       Tcl_NewIntObj(sdata->params[i].precision));
+		       Tcl_NewWideIntObj(sdata->params[i].precision));
 	Tcl_DictObjPut(NULL, paramDesc, literals[LIT_SCALE],
-		       Tcl_NewIntObj(sdata->params[i].scale));
+		       Tcl_NewWideIntObj(sdata->params[i].scale));
 	Tcl_DictObjPut(NULL, retVal, paramName, paramDesc);
     }
 
@@ -3234,7 +3234,7 @@ Tdbcpostgres_Init(
 
     /* Provide the current package */
 
-    if (Tcl_PkgProvide(interp, "tdbc::postgres", PACKAGE_VERSION) != TCL_OK) {
+    if (Tcl_PkgProvideEx(interp, "tdbc::postgres", PACKAGE_VERSION, NULL) != TCL_OK) {
 	return TCL_ERROR;
     }
 
