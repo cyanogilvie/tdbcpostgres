@@ -38,7 +38,7 @@ package require tdbc
 
     forward statementCreate ::tdbc::postgres::statement create
 
-    
+
     # The 'prepareCall' method gives a portable interface to prepare
     # calls to stored procedures.  It delegates to 'prepare' to do the
     # actual work.
@@ -53,7 +53,7 @@ package require tdbc
 	}
     }
 
-    # The 'init', 'begintransaction', 'commit, 'rollback', 'tables' 
+    # The 'init', 'begintransaction', 'commit, 'rollback', 'tables'
     #  and 'columns' methods are implemented in C.
 
 }
@@ -122,7 +122,7 @@ package require tdbc
     #     -- Returns a list of the names of the columns in the result.
     # nextdict
     #     -- Stores the next row of the result set in the given variable in
-    #        the caller's scope as a dictionary whose keys are 
+    #        the caller's scope as a dictionary whose keys are
     #        column names and whose values are column values, or else
     #        as a list of cells.
     # nextlist

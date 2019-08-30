@@ -113,7 +113,8 @@ const pqStubDefs* pqStubs = &pqStubsTable;
 MODULE_SCOPE Tcl_LoadHandle
 PostgresqlInitStubs(Tcl_Interp* interp)
 {
-    int i, j;
+    int i;
+    size_t j;
     int status;			/* Status of Tcl library calls */
     Tcl_Obj* path;		/* Path name of a module to be loaded */
     Tcl_Obj* shlibext;		/* Extension to use for load modules */

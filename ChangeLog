@@ -100,7 +100,7 @@
 		otherwise would give 'could not determine data type' errors.
 	* tests/tdbcpostgres.test (tdbc::postgres-18.[45]):
 		Added test cases for correct reporting of deduced parameter
-		types and for PostgreSQL 
+		types and for PostgreSQL
 
 2011-02-20  Kevin B. Kenny  <kennykb@acm.org>
 
@@ -219,27 +219,27 @@
 		link to its client library, nor include the standard
 		pq-fe headers. This change allows tdbc::postgres to
 		build when the build system lacks a PostgreSQL installation.
-	
+
 2010-04-25  Kevin B. Kenny  <kennykb@acm.org>
 
 	* configure.in: Changed TDBC_* environment variables to tdbc_* for
 	* README:       better TEA compatibility. Advanced version to 1.0b14.
 	* configure:    autoconf 2.59
-	
+
 2009-09-29  Kevin B. Kenny  <kennykb@acm.org>
 
 	* tests/tdbcpostgres.test: Changed all TEST_* environment variables
 				   to TDBCPOSTGRES_* for easier scripting
 			 	   of combined builds and tests.
-	
+
 2009-09-23  Kevin B. Kenny  <kennykb@acm.org>
 
 	* generic/tdbcpostgres.c: Removed an ugly workaround for a
 	                          bug in Tcl_SubstObj.
-	* configure.in: 
+	* configure.in:
 	* README:		Advanced version to 1.0b13
 	* configure:		autoconf 2.59
-	
+
 2009-09-19  Kevin B. Kenny  <kennykb@acm.org>
 
 	* configure (New file): autoconf 2.59
@@ -249,11 +249,11 @@
 	* library/tdbcpostgres.tcl: Manual conventions and correct memory
 	* tests/current.test:       mismanagement. Introduced a workaround
 			            for a suspected bug in Tcl_SubstObj.
-	
+
 2009-09-01  Kevin B. Kenny  <kennykb@acm.org>
 
 	Accepted tdbcpostgres from Slawomir Cygan for inclusion in
 	the standard tdbc driver distribution.
-	
+
 2009-06-22  Slawomir Cygan  <slawomir.cygan@gmail.com>
 	Initial baseline of a TDBC driver for Postgres.

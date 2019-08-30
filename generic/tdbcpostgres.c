@@ -219,7 +219,7 @@ static const struct {
     { "-encoding", TYPE_ENCODING,  0,		CONN_OPT_FLAG_MOD,   NULL},
     { "-isolation", TYPE_ISOLATION, 0,		CONN_OPT_FLAG_MOD,   NULL},
     { "-readonly", TYPE_READONLY,  0,		CONN_OPT_FLAG_MOD,   NULL},
-    { NULL,	   0,		   0,		0,		     NULL}
+    { NULL,	   TYPE_STRING,		   0,		0,		     NULL}
 };
 
 /*
@@ -1038,7 +1038,8 @@ ConfigureConnection(
     int optionIndex;		/* Index of the current option in
 				 * ConnOptions */
     int optionValue;		/* Integer value of the current option */
-    int i,j;
+    int i;
+    size_t j;
     char portval[10];		/* String representation of port number */
     char * encoding = NULL;	/* Selected encoding name */
     int isolation = ISOL_NONE;	/* Isolation level */
@@ -1822,7 +1823,7 @@ DeleteConnection(
 	PQfinish(cdata->pgPtr);
     }
     DecrPerInterpRefCount(cdata->pidata);
-    ckfree((char*) cdata);
+    ckfree(cdata);
 }
 
 /*
@@ -1927,7 +1928,7 @@ GenStatementName(
     char* retval;
     cdata->stmtCounter += 1;
     snprintf(stmtName, 30, "statement%d", cdata->stmtCounter);
-    retval = ckalloc(strlen(stmtName) + 1);
+    retval = (char *)ckalloc(strlen(stmtName) + 1);
     strcpy(retval, stmtName);
     return retval;
 }
@@ -2092,7 +2093,7 @@ ResultDescToTcl(
 	unsigned int i;
 	char numbuf[16];
 	for (i = 0; i < fieldCount; ++i) {
-	    int new;
+	    int isNew;
 	    int count = 1;
 	    Tcl_Obj* nameObj;
 	    Tcl_HashEntry* entry;
@@ -2100,15 +2101,15 @@ ResultDescToTcl(
 	    nameObj = Tcl_NewStringObj(fieldName, -1);
 	    Tcl_IncrRefCount(nameObj);
 	    entry =
-		Tcl_CreateHashEntry(&names, fieldName, &new);
-	    while (!new) {
+		Tcl_CreateHashEntry(&names, fieldName, &isNew);
+	    while (!isNew) {
 	        count = PTR2INT(Tcl_GetHashValue(entry));
 		++count;
 		Tcl_SetHashValue(entry, INT2PTR(count));
 		sprintf(numbuf, "#%d", count);
 		Tcl_AppendToObj(nameObj, numbuf, -1);
 		entry = Tcl_CreateHashEntry(&names, Tcl_GetString(nameObj),
-					    &new);
+					    &isNew);
 	    }
 	    Tcl_SetHashValue(entry, INT2PTR(count));
 	    Tcl_ListObjAppendElement(NULL, retval, nameObj);
@@ -2557,14 +2558,14 @@ DeleteStatement(
 	Tcl_DecrRefCount(sdata->nativeSql);
     }
     if (sdata->params != NULL) {
-	ckfree((char*)sdata->params);
+	ckfree(sdata->params);
     }
     if (sdata->paramDataTypes != NULL) {
-	ckfree((char*)sdata->paramDataTypes);
+	ckfree(sdata->paramDataTypes);
     }
     Tcl_DecrRefCount(sdata->subVars);
     DecrConnectionRefCount(sdata->cdata);
-    ckfree((char*)sdata);
+    ckfree(sdata);
 }
 
 /*
@@ -2738,7 +2739,7 @@ ResultSetConstructor(
     paramValues = (const char**) ckalloc(sdata->nParams * sizeof(char* ));
     paramLengths = (int*) ckalloc(sdata->nParams * sizeof(int*));
     paramFormats = (int*) ckalloc(sdata->nParams * sizeof(int*));
-    paramNeedsFreeing = ckalloc(sdata->nParams);
+    paramNeedsFreeing = (char *)ckalloc(sdata->nParams);
     paramTempObjs = (Tcl_Obj**) ckalloc(sdata->nParams * sizeof(Tcl_Obj*));
 
     memset(paramNeedsFreeing, 0, sdata->nParams);
@@ -2771,12 +2772,12 @@ ResultSetConstructor(
 
 	    switch (sdata->paramDataTypes[i]) {
 	    case INT2OID:
-		bufPtr = ckalloc(sizeof(int));
+		bufPtr = (char *)ckalloc(sizeof(int));
 		if (Tcl_GetIntFromObj(interp, paramValObj,
 				      (int*) bufPtr) != TCL_OK) {
 		    goto freeParamTables;
 		}
-		paramValues[i]=ckalloc(sizeof(int16_t));
+		paramValues[i] = (char *)ckalloc(sizeof(int16_t));
 		paramNeedsFreeing[i] = 1;
 		tmp16 = *(int*) bufPtr;
 		ckfree(bufPtr);
@@ -2786,12 +2787,12 @@ ResultSetConstructor(
 		break;
 
 	    case INT4OID:
-		bufPtr = ckalloc(sizeof(long));
+		bufPtr = (char *)ckalloc(sizeof(long));
 		if (Tcl_GetLongFromObj(interp, paramValObj,
 				       (long*) bufPtr) != TCL_OK) {
 		    goto freeParamTables;
 		}
-		paramValues[i]=ckalloc(sizeof(int32_t));
+		paramValues[i] = (char *)ckalloc(sizeof(int32_t));
 		paramNeedsFreeing[i] = 1;
 		tmp32 = *(long*) bufPtr;
 		ckfree(bufPtr);
@@ -2885,18 +2886,18 @@ ResultSetConstructor(
  freeParamTables:
     for (i = 0; i < sdata->nParams; ++i) {
 	if (paramNeedsFreeing[i]) {
-	    ckfree((char*) paramValues[i]);
+	    ckfree(paramValues[i]);
 	}
 	if (paramTempObjs[i] != NULL) {
 	    Tcl_DecrRefCount(paramTempObjs[i]);
 	}
     }
 
-    ckfree((char*)paramValues);
-    ckfree((char*)paramLengths);
-    ckfree((char*)paramFormats);
-    ckfree((char*)paramNeedsFreeing);
-    ckfree((char*)paramTempObjs);
+    ckfree(paramValues);
+    ckfree(paramLengths);
+    ckfree(paramFormats);
+    ckfree(paramNeedsFreeing);
+    ckfree(paramTempObjs);
 
     return status;
 
@@ -3114,7 +3115,7 @@ DeleteResultSet(
 	PQclear(rdata->execResult);
     }
     DecrStatementRefCount(rdata->sdata);
-    ckfree((char*)rdata);
+    ckfree(rdata);
 }
 
 /*
@@ -3211,7 +3212,10 @@ ResultSetRowcountMethod(
  *-----------------------------------------------------------------------------
  */
 
-extern DLLEXPORT int
+#ifdef __cplusplus
+extern "C" {
+#endif  /* __cplusplus */
+DLLEXPORT int
 Tdbcpostgres_Init(
     Tcl_Interp* interp		/* Tcl interpreter */
 ) {
@@ -3250,11 +3254,11 @@ Tdbcpostgres_Init(
     }
     Tcl_InitHashTable(&(pidata->typeNumHash), TCL_ONE_WORD_KEYS);
     for (i = 0; dataTypes[i].name != NULL; ++i) {
-	int new;
+	int isNew;
 	Tcl_HashEntry* entry =
 	    Tcl_CreateHashEntry(&(pidata->typeNumHash),
 				INT2PTR(dataTypes[i].oid),
-				&new);
+				&isNew);
 	Tcl_Obj* nameObj = Tcl_NewStringObj(dataTypes[i].name, -1);
 	Tcl_IncrRefCount(nameObj);
 	Tcl_SetHashValue(entry, (ClientData) nameObj);
@@ -3370,6 +3374,9 @@ Tdbcpostgres_Init(
 
     return TCL_OK;
 }
+#ifdef __cplusplus
+}
+#endif  /* __cplusplus */
 
 /*
  *-----------------------------------------------------------------------------
@@ -3405,7 +3412,7 @@ DeletePerInterpData(
    for (i = 0; i < LIT__END; ++i) {
        Tcl_DecrRefCount(pidata->literals[i]);
    }
-   ckfree((char *) pidata);
+   ckfree(pidata);
 
    Tcl_MutexLock(&pgMutex);
    if (--pgRefCount == 0) {
