@@ -154,6 +154,8 @@ enum OptType {
     TYPE_ENCODING,		/* Encoding name */
     TYPE_ISOLATION,		/* Transaction isolation level */
     TYPE_READONLY,		/* Read-only indicator */
+    TYPE_ATTACH			/* Not stored, used to attach to a
+				   previously detached connection */
 };
 
 /* Locations of the string options in the string array */
@@ -161,7 +163,7 @@ enum OptType {
 enum OptStringIndex {
     INDX_HOST, INDX_HOSTA, INDX_PORT, INDX_DB, INDX_USER,
     INDX_PASS, INDX_OPT, INDX_TTY, INDX_SERV, INDX_TOUT,
-    INDX_SSLM, INDX_RSSL, INDX_KERB,
+    INDX_SSLM, INDX_RSSL, INDX_KERB, INDX_ATTACH,
     INDX_MAX
 };
 
@@ -170,7 +172,7 @@ enum OptStringIndex {
 static const char *const optStringNames[] = {
     "host", "hostaddr", "port", "dbname", "user",
     "password", "options", "tty", "service", "connect_timeout",
-    "sslmode", "requiressl", "krbsrvname"
+    "sslmode", "requiressl", "krbsrvname", "attach"
 };
 
 /* Flags in the configuration table */
@@ -219,6 +221,7 @@ static const struct {
     { "-encoding", TYPE_ENCODING,  0,		CONN_OPT_FLAG_MOD,   NULL},
     { "-isolation", TYPE_ISOLATION, 0,		CONN_OPT_FLAG_MOD,   NULL},
     { "-readonly", TYPE_READONLY,  0,		CONN_OPT_FLAG_MOD,   NULL},
+    { "-attach",   TYPE_ATTACH,    INDX_ATTACH, 0,		     NULL},
     { NULL,	   TYPE_STRING,		   0,		0,		     NULL}
 };
 
@@ -436,6 +439,9 @@ static int ConnectionRollbackMethod(ClientData clientData, Tcl_Interp* interp,
 static int ConnectionTablesMethod(ClientData clientData, Tcl_Interp* interp,
 				  Tcl_ObjectContext context,
 				  int objc, Tcl_Obj *const objv[]);
+static int ConnectionDetachMethod(ClientData clientData, Tcl_Interp* interp,
+				  Tcl_ObjectContext context,
+				  int objc, Tcl_Obj *const objv[]);
 static void DeleteConnectionMetadata(ClientData clientData);
 static void DeleteConnection(ConnectionData* cdata);
 static int CloneConnection(Tcl_Interp* interp, ClientData oldClientData,
@@ -627,6 +633,15 @@ const static Tcl_MethodType ConnectionTablesMethodType = {
     NULL			/* cloneProc */
 };
 
+const static Tcl_MethodType ConnectionDetachMethodType = {
+    TCL_OO_METHOD_VERSION_CURRENT,
+				/* version */
+    "detach",			/* name */
+    ConnectionDetachMethod,	/* callProc */
+    NULL,			/* deleteProc */
+    NULL			/* cloneProc */
+};
+
 const static Tcl_MethodType* ConnectionMethods[] = {
     &ConnectionBegintransactionMethodType,
     &ConnectionColumnsMethodType,
@@ -634,6 +649,7 @@ const static Tcl_MethodType* ConnectionMethods[] = {
     &ConnectionConfigureMethodType,
     &ConnectionRollbackMethodType,
     &ConnectionTablesMethodType,
+    &ConnectionDetachMethodType,
     NULL
 };
 
@@ -675,6 +691,16 @@ const static Tcl_MethodType* StatementMethods[] = {
     &StatementParamtypeMethodType,
     NULL
 };
+
+/*
+ * Global hash containing the detached pg connections indexed by handle.
+ * Access to DetachedConnections and DetachedConnectionsSeq must be
+ * protected by the DetachedConnectionsMutex mutex!
+ */
+
+TCL_DECLARE_MUTEX(DetachedConnectionsMutex);
+static int		DetachedConnectionsSeq = 0;
+static Tcl_HashTable	DetachedConnections;
 
 /*
  *-----------------------------------------------------------------------------
@@ -1050,6 +1076,16 @@ ConfigureConnection(
     Tcl_Obj* retval;
     Tcl_Obj* optval;
     int vers;			/* PostgreSQL major version */
+    Tcl_HashEntry* he = NULL;
+    int res = TCL_OK;
+    ConnectionData* detachedcdata = NULL;
+    				/* The detached connection data we retrieved
+				 * from DetachedConnections
+				 */
+    PerInterpData* savedpidata = NULL;
+    				/* Temporary location to save our pidata
+				 * during -attach handling
+				 */
 
     if (cdata->pgPtr != NULL) {
 
@@ -1161,6 +1197,45 @@ ConfigureConnection(
 	    if (Tcl_GetBooleanFromObj(interp, objv[i+1], &readOnly)
 		!= TCL_OK) {
 		return TCL_ERROR;
+	    }
+	    break;
+	case TYPE_ATTACH:
+	    /* TODO: Don't allow this in safe interps */
+	    /* If -attach is given, it must be the only option */
+	    if (i != skip || i > objc-2) {
+		Tcl_WrongNumArgs(interp, skip, objv, "-attach connection_handle");
+		return TCL_ERROR;
+	    }
+	    /*
+	     *	- with a mutex held: {
+	     *	    - retrieve connection_handle from the global detached handle hash
+	     *	    - populate our cdata with it
+	     *	    - delete the hash entry (effectively transferring the cdata refcount to us)
+	     *	    - restore cdata->pidata
+	     *	}
+	     */
+	    Tcl_MutexLock(&DetachedConnectionsMutex);
+	    he = Tcl_FindHashEntry(&DetachedConnections, Tcl_GetString(objv[i+1]));
+	    if (he == NULL) {
+		Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+			    "%s is not a valid detached connection handle",
+			    Tcl_GetString(objv[i+1])));
+		res = TCL_ERROR;
+	    } else {
+		detachedcdata = Tcl_GetHashValue(he);
+		savedpidata = cdata->pidata;
+		memcpy(cdata, detachedcdata, sizeof(ConnectionData));
+		ckfree(detachedcdata);
+		detachedcdata = NULL;
+		cdata->pidata = savedpidata;
+		savedpidata = NULL;
+		/* Take the ref from the hash table entry */
+		Tcl_DeleteHashEntry(he);
+		he = NULL;
+	    }
+	    Tcl_MutexUnlock(&DetachedConnectionsMutex);
+	    if (res != TCL_OK) {
+		return res;
 	    }
 	    break;
 	}
@@ -1788,6 +1863,111 @@ ConnectionTablesMethod(
     PQclear(res);
 
     Tcl_SetObjResult(interp, retval);
+    return TCL_OK;
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * ConnectionDetachMethod --
+ *
+ *	Method that detaches the PG connection from this instance
+ *	(destroying it), saves it in a global hash table of detached
+ *	connections
+ *
+ * Usage:
+ * 	$connection detach
+ *
+ * Parameters:
+ *	None.
+ *
+ * Results:
+ *	Handle that can later be used (possibly from another thread) to
+ *	re-attach to this connection
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static int
+ConnectionDetachMethod(
+    ClientData clientData,	/* Completion type */
+    Tcl_Interp* interp,		/* Tcl interpreter */
+    Tcl_ObjectContext objectContext, /* Object context */
+    int objc,			/* Parameter count */
+    Tcl_Obj *const objv[]	/* Parameter vector */
+) {
+    Tcl_Object thisObject = Tcl_ObjectContextObject(objectContext);
+				/* The current connection object */
+    ConnectionData* cdata = (ConnectionData*)
+	Tcl_ObjectGetMetadata(thisObject, &connectionDataType);
+				/* Instance data */
+    Tcl_Command thisObjectCommand = Tcl_GetObjectCommand(thisObject);
+    				/* Our object command */
+    int new, res = TCL_OK;
+    Tcl_HashEntry* he = NULL;
+    char handle[20+sizeof("pqhandle")];	/* 20: longest string representation
+					 * of a 64 bit integer. \0 terminator
+					 * accounted for by sizeof
+					 */
+
+    /* Check parameters */
+
+    if (objc != 2) {
+	Tcl_WrongNumArgs(interp, 2, objv, "");
+	return TCL_ERROR;
+    }
+
+    /*
+     *	- ensure cdata isn't shared (trying to detach while result sets,
+     *		statements, etc still refer to the connection)
+     *	- with a mutex held: {
+     *	    - Create a new(!) hash entry
+     *	    - Decref our pidata and clear it from cdata
+     *	    - Incref our cdata (for the hash entry ref)
+     *	    - Store our cdata in the hash entry
+     *	}
+     *	- Destroy this connection object
+     */
+
+    if (cdata->refCount > 1) {
+
+	/* TODO: possibly kill these proactively?  */
+
+	Tcl_SetObjResult(interp, Tcl_ObjPrintf("Can't detach while statements and result sets are still open"));
+	return TCL_ERROR;
+    }
+
+    Tcl_MutexLock(&DetachedConnectionsMutex);
+    snprintf(handle, 20+sizeof("pqhandle"), "pqhandle%d", ++DetachedConnectionsSeq);
+    he = Tcl_CreateHashEntry(&DetachedConnections, handle, &new);
+    if (new) {
+	DecrPerInterpRefCount(cdata->pidata);
+	cdata->pidata = NULL;
+	IncrConnectionRefCount(cdata);
+	Tcl_SetHashValue(he, cdata);
+    } else {
+	Tcl_SetObjResult(interp, Tcl_ObjPrintf("Generated a handle but it wasn't new: \"%s\"", handle));
+	res = TCL_ERROR;
+    }
+    Tcl_MutexUnlock(&DetachedConnectionsMutex);
+    if (res != TCL_OK) {
+	return res;
+    }
+
+    /* Delete our object command for the side-effect of destroying this object
+     * TODO: is there a more direct way to do this?
+     */
+
+    if (Tcl_DeleteCommandFromToken(interp, thisObjectCommand) != TCL_OK) {
+
+	/* TODO: Tcl_Panic rather?  Things are in an inconsistent state */
+
+	Tcl_SetObjResult(interp, Tcl_NewStringObj("Attempt to destroy this connection object after detaching failed", -1));
+	return TCL_ERROR;
+    }
+
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(handle, -1));
+
     return TCL_OK;
 }
 
@@ -3241,6 +3421,12 @@ Tdbcpostgres_Init(
     if (Tcl_PkgProvideEx(interp, "tdbc::postgres", PACKAGE_VERSION, NULL) != TCL_OK) {
 	return TCL_ERROR;
     }
+
+    /* Create the detached connection global hash */
+
+    Tcl_MutexLock(&DetachedConnectionsMutex);
+    Tcl_InitHashTable(&DetachedConnections, TCL_STRING_KEYS);
+    Tcl_MutexUnlock(&DetachedConnectionsMutex);
 
     /*
      * Create per-interpreter data for the package

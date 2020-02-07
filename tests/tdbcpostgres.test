@@ -3221,6 +3221,50 @@ test tdbc::postgres-30.1 {Multiple result sets - but in reality only one} {*}{
     -result {{{idnum 2 name wilma}}}
 }
 
+test tdbc::postgres-40.1 {Detach and re-attach, same interp, same thread} {*}{
+    -setup {
+	tdbc::postgres::connection create ::db_postgres-40.1a {*}$connFlags
+    }
+    -body {
+	set detachedhandle	[::db_postgres-40.1a detach]
+	set res			[info object isa object ::db_postgres-40.1a]
+	tdbc::postgres::connection create ::db_postgres-40.1b -attach $detachedhandle
+	lappend res		[info object isa object ::db_postgres-40.1b]
+
+	set res
+    }
+    -cleanup {
+	unset -nocomplain detachedhandle res
+	if {[info object isa object ::db_postgres-40.1a]} { rename ::db_postgres-40.1a {} }
+	if {[info object isa object ::db_postgres-40.1b]} { rename ::db_postgres-40.1b {} }
+    }
+    -result {0 1}
+}
+
+test tdbc::postgres-40.2 {Detach and re-attach, test revived connection, same interp, same thread} {*}{
+    -setup {
+	::db allrows {delete from people}
+	tdbc::postgres::connection create ::db_postgres-40.2a {*}$connFlags
+    }
+    -body {
+	::db_postgres-40.2a allrows {insert into people (idnum, name, info) values (1234, 'Test postgres-40.2', NULL)}
+	set detachedhandle	[::db_postgres-40.2a detach]
+	set res			[info object isa object ::db_postgres-40.2a]
+	tdbc::postgres::connection create ::db_postgres-40.2b -attach $detachedhandle
+	lappend res		[info object isa object ::db_postgres-40.2b]
+	lappend res		[lindex [::db_postgres-40.2b allrows -as lists {select name from people}] 0 0]
+
+	set res
+    }
+    -cleanup {
+	unset -nocomplain detachedhandle res
+	if {[info object isa object ::db_postgres-40.2a]} { rename ::db_postgres-40.2a {} }
+	if {[info object isa object ::db_postgres-40.2b]} { rename ::db_postgres-40.2b {} }
+	::db allrows {delete from people}
+    }
+    -result {0 1 {Test postgres-40.2}}
+}
+
 #-------------------------------------------------------------------------------
 
 # Test cleanup. Drop tables and get rid of the test database.
