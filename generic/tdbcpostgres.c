@@ -442,6 +442,9 @@ static int ConnectionTablesMethod(ClientData clientData, Tcl_Interp* interp,
 static int ConnectionDetachMethod(ClientData clientData, Tcl_Interp* interp,
 				  Tcl_ObjectContext context,
 				  int objc, Tcl_Obj *const objv[]);
+static int ConnectionConnectedMethod(ClientData clientData, Tcl_Interp* interp,
+				  Tcl_ObjectContext context,
+				  int objc, Tcl_Obj *const objv[]);
 static void DeleteConnectionMetadata(ClientData clientData);
 static void DeleteConnection(ConnectionData* cdata);
 static int CloneConnection(Tcl_Interp* interp, ClientData oldClientData,
@@ -642,6 +645,15 @@ const static Tcl_MethodType ConnectionDetachMethodType = {
     NULL			/* cloneProc */
 };
 
+const static Tcl_MethodType ConnectionConnectedMethodType = {
+    TCL_OO_METHOD_VERSION_CURRENT,
+				/* version */
+    "connected",		/* name */
+    ConnectionConnectedMethod,	/* callProc */
+    NULL,			/* deleteProc */
+    NULL			/* cloneProc */
+};
+
 const static Tcl_MethodType* ConnectionMethods[] = {
     &ConnectionBegintransactionMethodType,
     &ConnectionColumnsMethodType,
@@ -650,6 +662,7 @@ const static Tcl_MethodType* ConnectionMethods[] = {
     &ConnectionRollbackMethodType,
     &ConnectionTablesMethodType,
     &ConnectionDetachMethodType,
+    &ConnectionConnectedMethodType,
     NULL
 };
 
@@ -1967,6 +1980,61 @@ ConnectionDetachMethod(
     }
 
     Tcl_SetObjResult(interp, Tcl_NewStringObj(handle, -1));
+
+    return TCL_OK;
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * ConnectionConnectedMethod --
+ *
+ *	Method that checks the current connection status
+ *
+ * Usage:
+ * 	$connection connected
+ *
+ * Parameters:
+ *	None.
+ *
+ * Results:
+ *	true if the database connection is currently valid, false otherwise
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static int
+ConnectionConnectedMethod(
+    ClientData clientData,	/* Completion type */
+    Tcl_Interp* interp,		/* Tcl interpreter */
+    Tcl_ObjectContext objectContext, /* Object context */
+    int objc,			/* Parameter count */
+    Tcl_Obj *const objv[]	/* Parameter vector */
+) {
+    Tcl_Object thisObject = Tcl_ObjectContextObject(objectContext);
+				/* The current connection object */
+    ConnectionData* cdata = (ConnectionData*)
+	Tcl_ObjectGetMetadata(thisObject, &connectionDataType);
+				/* Instance data */
+    int		connected = 1;
+    PGresult*	res = NULL;
+
+    /* Check parameters */
+
+    if (objc != 2) {
+	Tcl_WrongNumArgs(interp, 2, objv, "");
+	return TCL_ERROR;
+    }
+
+    if (PQstatus(cdata->pgPtr) != CONNECTION_OK) {
+	connected = 0;
+    } else {
+	res = PQexec(cdata->pgPtr, "");
+	connected = (PQresultStatus(res) == PGRES_EMPTY_QUERY);
+	if (res) PQclear(res);
+    }
+
+    Tcl_SetObjResult(interp, cdata->pidata->literals[connected ? LIT_1 : LIT_0]);
 
     return TCL_OK;
 }
