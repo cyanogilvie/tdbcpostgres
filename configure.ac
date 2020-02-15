@@ -115,7 +115,7 @@ AC_CHECK_SIZEOF([long])
 # and PKG_TCL_SOURCES.
 #-----------------------------------------------------------------------
 
-TEA_ADD_SOURCES(generic/tdbcpostgres.c generic/pqStubInit.c)
+TEA_ADD_SOURCES(generic/tdbcpostgres.c generic/pqStubInit.c generic/names.c)
 TEA_ADD_HEADERS(generic/fakepq.h generic/pqStubs.h)
 if test "${TCL_MAJOR_VERSION}" -eq 8 ; then
   if test "${TCL_MINOR_VERSION}" -eq 5 ; then
@@ -196,6 +196,9 @@ TEA_ENABLE_SHARED
 #--------------------------------------------------------------------
 
 TEA_CONFIG_CFLAGS
+
+# Check for required polyfill
+TIP445
 
 #--------------------------------------------------------------------
 # Set the default compiler switches based on the --enable-symbols option.

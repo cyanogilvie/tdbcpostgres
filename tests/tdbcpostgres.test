@@ -811,7 +811,6 @@ test tdbc::postgres-8.5 {anonymous columns - lists} {*}{
     -result {1 {6 6} 0}
 };
 
-
 test tdbc::postgres-8.2 {nextrow - as lists} {*}{
     -setup {
 	set stmt [::db prepare {
@@ -2713,7 +2712,7 @@ test tdbc::postgres-19.1 {$connection configure - no args} \
 		 -options {} -tty {} -service {} -timeout {} \
 		 -sslmode * -requiressl * -krbsrvname * \
 		 -encoding UTF8 -isolation readcommitted \
-		 -readonly 0 ]
+		 -readonly 0 -attach {} ]
 
 test tdbc::postgres-19.2 {$connection configure - unknown arg} {*}{
     -body {
@@ -2981,9 +2980,6 @@ catch {::db allrows {DROP TABLE c}}
 catch {::db allrows {DROP TABLE b}}
 catch {::db allrows {DROP TABLE a}}
 
-# The MyISAM engine doesn't track foreign key constraints, so force the
-# tables to be InnoDB.
-
 ::db allrows {
     CREATE TABLE a (
         k1 INTEGER,
@@ -3219,147 +3215,6 @@ test tdbc::postgres-30.1 {Multiple result sets - but in reality only one} {*}{
 	set results
     }
     -result {{{idnum 2 name wilma}}}
-}
-
-test tdbc::postgres-40.0 {Detach method, too many args} {*}{
-    -body {
-	list [catch {::db detach foo} r o] $r [dict get $o -errorcode]
-    }
-    -cleanup {
-	unset -nocomplain r o
-    }
-    -result {1 {wrong # args: should be "::db detach "} {TCL WRONGARGS}}
-}
-
-test tdbc::postgres-40.1 {Detach and re-attach, same interp, same thread} {*}{
-    -setup {
-	tdbc::postgres::connection create ::db_postgres-40.1a {*}$connFlags
-    }
-    -body {
-	set detachedhandle	[::db_postgres-40.1a detach]
-	set res			[info object isa object ::db_postgres-40.1a]
-	tdbc::postgres::connection create ::db_postgres-40.1b -attach $detachedhandle
-	lappend res		[info object isa object ::db_postgres-40.1b]
-
-	set res
-    }
-    -cleanup {
-	unset -nocomplain detachedhandle res
-	if {[info object isa object ::db_postgres-40.1a]} { rename ::db_postgres-40.1a {} }
-	if {[info object isa object ::db_postgres-40.1b]} { rename ::db_postgres-40.1b {} }
-    }
-    -result {0 1}
-}
-
-test tdbc::postgres-40.2 {Detach and re-attach, test revived connection, same interp, same thread} {*}{
-    -setup {
-	::db allrows {delete from people}
-	tdbc::postgres::connection create ::db_postgres-40.2a {*}$connFlags
-    }
-    -body {
-	::db_postgres-40.2a allrows {insert into people (idnum, name, info) values (1234, 'Test postgres-40.2', NULL)}
-	set detachedhandle	[::db_postgres-40.2a detach]
-	set res			[info object isa object ::db_postgres-40.2a]
-	tdbc::postgres::connection create ::db_postgres-40.2b -attach $detachedhandle
-	lappend res		[info object isa object ::db_postgres-40.2b]
-	lappend res		[lindex [::db_postgres-40.2b allrows -as lists {select name from people}] 0 0]
-
-	set res
-    }
-    -cleanup {
-	unset -nocomplain detachedhandle res
-	if {[info object isa object ::db_postgres-40.2a]} { rename ::db_postgres-40.2a {} }
-	if {[info object isa object ::db_postgres-40.2b]} { rename ::db_postgres-40.2b {} }
-	::db allrows {delete from people}
-    }
-    -result {0 1 {Test postgres-40.2}}
-}
-
-test tdbc::postgres-41.0 {Connected method, too many args} {*}{
-    -body {
-	list [catch {::db connected foo} r o] $r [dict get $o -errorcode]
-    }
-    -cleanup {
-	unset -nocomplain r o
-    }
-    -result {1 {wrong # args: should be "::db connected "} {TCL WRONGARGS}}
-}
-
-test tdbc::postgres-41.1 {Connected method} {*}{
-    -setup {
-	tdbc::postgres::connection create ::db_postgres-41.1 {*}$connFlags
-	set nonce	postgres-41.1_[expr {rand()*(2**32)}]
-	set mypid	[lindex [::db_postgres-41.1 allrows -as lists "select pid,'$nonce' as nonce from pg_stat_activity where query like 'select pid,''$nonce'' as nonce from pg_stat_activity where query like %'"] 0 0]
-    }
-    -body {
-	set res	{}
-	lappend res [::db_postgres-41.1 connected]
-	lappend res [::db allrows -as lists {select pg_terminate_backend(:mypid)}]
-	lappend res [::db_postgres-41.1 connected]
-	lappend res [::db_postgres-41.1 connected]	;# Second call should take the PQstatus != CONNECTION_OK branch
-	set res
-    }
-    -cleanup {
-	if {[info object isa object ::db_postgres-41.1]} { rename ::db_postgres-41.1 {} }
-	unset -nocomplain mypid nonce res
-    }
-    -result {1 t 0 0}
-}
-
-test tdbc::postgres-41.1 {Connected method} {*}{
-    -setup {
-	tdbc::postgres::connection create ::db_postgres-41.1 {*}$connFlags
-	set nonce	postgres-41.1_[expr {rand()*(2**32)}]
-	set mypid	[lindex [::db_postgres-41.1 allrows -as lists "select pid,'$nonce' as nonce from pg_stat_activity where query like 'select pid,''$nonce'' as nonce from pg_stat_activity where query like %'"] 0 0]
-    }
-    -body {
-	set res	{}
-	lappend res [::db_postgres-41.1 connected]
-	lappend res [::db allrows -as lists {select pg_terminate_backend(:mypid)}]
-	lappend res [::db_postgres-41.1 connected]
-	lappend res [::db_postgres-41.1 connected]	;# Second call should take the PQstatus != CONNECTION_OK branch
-	set res
-    }
-    -cleanup {
-	if {[info object isa object ::db_postgres-41.1]} { rename ::db_postgres-41.1 {} }
-	unset -nocomplain mypid nonce res
-    }
-    -result {1 t 0 0}
-}
-
-test tdbc::postgres-50.1 {Detach with statements associated} {*}{
-    -setup {
-	tdbc::postgres::connection create ::db_postgres-50.1a {*}$connFlags
-    }
-    -body {
-	set res {}
-	set first	[lindex [time {
-	    set stmt	[::db_postgres-50.1a prepare {select 'prepared'}]
-	}] 0]
-	lappend res	[info object isa object $stmt]
-	lappend res	[$stmt allrows -as lists]
-	set detachedhandle	[::db_postgres-50.1a detach]
-	lappend res	[info object isa object ::db_postgres-50.1a]
-	tdbc::postgres::connection create ::db_postgres-50.1b -attach $detachedhandle
-	lappend res	[info object isa object $stmt]
-	set second	[lindex [time {
-	    set stmt	[::db_postgres-50.1b prepare {select 'prepared'}]
-	}] 0]
-	lappend res	[$stmt allrows -as lists]
-
-	lappend res [expr {
-	    $second < $first / 5
-	    	? "faster"
-		: "First prepare: $first, second: $second"
-	}]
-	set res
-    }
-    -cleanup {
-	unset -nocomplain detachedhandle res first second
-	if {[info object isa object ::db_postgres-50.1a]} { rename ::db_postgres-50.1a {} }
-	if {[info object isa object ::db_postgres-50.1b]} { rename ::db_postgres-50.1b {} }
-    }
-    -result {1 prepared 0 0 prepared faster}
 }
 
 #-------------------------------------------------------------------------------

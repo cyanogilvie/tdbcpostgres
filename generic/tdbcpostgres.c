@@ -1,8 +1,12 @@
-#include <signal.h>
-
-#include <unistd.h>
-#include <time.h>
-#define TIME(label, task) \
+#if DEBUG
+#    include <signal.h>
+#    include <unistd.h>
+#    include <time.h>
+#    include "names.h"
+#    define DBG(...) fprintf(stdout, ##__VA_ARGS__)
+#    define FDBG(...) fprintf(stdout, ##__VA_ARGS__)
+#    define DEBUGGER raise(SIGTRAP)
+#    define TIME(label, task) \
     do { \
 	struct timespec first; \
 	struct timespec second; \
@@ -16,8 +20,30 @@
 	clock_gettime(CLOCK_MONOTONIC, &after); \
 	empty = second.tv_sec - first.tv_sec + (second.tv_nsec - first.tv_nsec)/1e9; \
 	delta = after.tv_sec - second.tv_sec + (after.tv_nsec - second.tv_nsec)/1e9 - empty; \
-	fprintf(stderr, "Time for %s: %.1f microseconds\n", label, delta * 1e6); \
+	DBG("Time for %s: %.1f microseconds\n", label, delta * 1e6); \
     } while(0)
+
+int g_statements = 0;
+int g_connections = 0;
+#define DUMP_STATEMENTS(cdata) \
+    do { \
+	Tcl_HashEntry* he = NULL; \
+	Tcl_HashSearch search; \
+	he = Tcl_FirstHashEntry(cdata->statements, &search); \
+	while (he) { \
+	    StatementData* s = Tcl_GetHashValue(he); \
+	    DBG("\t-%s- %s, refCount %d, %s\n", s && s->cdata ? "live" : "frozen", name(s), s ? s->refCount : -1, (char*)Tcl_GetHashKey(cdata->statements, he)); \
+	    he = Tcl_NextHashEntry(&search); \
+	} \
+    } while (0)
+
+#else
+#    define DBG(...) /* nop */
+#    define FDBG(...) /* nop */
+#    define DEBUGGER /* nop */
+#    define TIME(label, task) task
+#    define DUMP_STATEMENTS(cdata) /* nop */
+#endif
 
 /*
  *-----------------------------------------------------------------------------
@@ -61,6 +87,8 @@
 #else
 #  include "fakepq.h"
 #endif
+
+#include "tip445.h"
 
 /* Include the files needed to locate htons() and htonl() */
 
@@ -287,8 +315,8 @@ typedef struct ConnectionData {
     int flags;
     int isolation;		/* Current isolation level */
     int readOnly;		/* Read only connection indicator */
-    char * savedOpts[INDX_MAX];  /* Saved configuration options */
-    Tcl_HashTable* statements;	/* Prepared statements, only when detached */
+    char * savedOpts[INDX_MAX]; /* Saved configuration options */
+    Tcl_HashTable* statements;	/* Prepared statements */
 } ConnectionData;
 
 /*
@@ -299,15 +327,23 @@ typedef struct ConnectionData {
 
 #define IncrConnectionRefCount(x) \
     do {			  \
-	++((x)->refCount);	  \
+	ConnectionData* conn = x;		\
+	DBG("> IncrConnectionRefCount %s %d -> %d @ " __FILE__ " %s %d\n", name(conn), conn->refCount, conn->refCount+1, __FUNCTION__, __LINE__); \
+	++(conn->refCount);	  \
     } while(0)
 #define DecrConnectionRefCount(x)		\
     do {					\
 	ConnectionData* conn = x;		\
+	DBG("< DecrConnectionRefCount %s %d -> %d @ " __FILE__ " %s %d\n", name(conn), conn->refCount, conn->refCount-1, __FUNCTION__, __LINE__); \
 	if ((--(conn->refCount)) <= 0) {	\
 	    DeleteConnection(conn);		\
 	}					\
     } while(0)
+
+struct pgStatementRef {
+    Tcl_Obj* obj;
+    struct pgStatementRef* next;
+};
 
 /*
  * Structure that carries the data for a Postgres prepared statement.
@@ -325,7 +361,7 @@ typedef struct StatementData {
     Tcl_Obj* subVars;	        /* List of variables to be substituted, in the
 				 * order in which they appear in the
 				 * statement */
-    Tcl_Obj* origSql;		/* The SQL statement as it came from
+    char* origSql;		/* The SQL statement as it came from
 				 * the caller */
     Tcl_Obj* nativeSql;		/* Native SQL statement to pass into
 				 * Postgres */
@@ -337,14 +373,21 @@ typedef struct StatementData {
     Oid* paramDataTypes;	/* Param data types list */
     int paramTypesChanged;	/* Indicator of changed param types */
     int flags;
+    struct pgStatementRef* pgStatement;
+    				/* Linked list of pgStatement objs so
+				 * we can expire their intreps when
+				 * detaching or destroying a connection */
 } StatementData;
 #define IncrStatementRefCount(x)		\
     do {					\
-	++((x)->refCount);			\
+	StatementData* stmt = (x);		\
+	DBG("\t> IncrStatementRefCount %s/%s %d -> %d @ " __FILE__ " %s %d\n", name(stmt->cdata), name(stmt), stmt->refCount, stmt->refCount+1, __FUNCTION__, __LINE__); \
+	++(stmt->refCount);			\
     } while (0)
 #define DecrStatementRefCount(x)		\
     do {					\
 	StatementData* stmt = (x);		\
+	DBG("\t< DecrStatementRefCount %s/%s %d -> %d @ " __FILE__ " %s %d\n", name(stmt->cdata), name(stmt), stmt->refCount, stmt->refCount-1, __FUNCTION__, __LINE__); \
 	if (--(stmt->refCount) <= 0) {		\
 	    DeleteStatement(stmt);		\
 	}					\
@@ -476,7 +519,7 @@ static void DeleteConnectionMetadata(ClientData clientData);
 static void DeleteConnection(ConnectionData* cdata);
 static int CloneConnection(Tcl_Interp* interp, ClientData oldClientData,
 			   ClientData* newClientData);
-static void DeleteDetachMetadata(ClientData clientData) { /* nop */ }
+static void DeleteDestroyMetadata(ClientData clientData) { /* nop */ }
 
 static char* GenStatementName(ConnectionData* cdata);
 static void UnallocateStatement(PGconn* pgPtr, char* stmtName);
@@ -519,6 +562,12 @@ static void DeleteCmd(ClientData clientData);
 static int CloneCmd(Tcl_Interp* interp,
 		    ClientData oldMetadata, ClientData* newMetadata);
 static void DeletePerInterpData(PerInterpData* pidata);
+static int GetPgStatementFromObj(Tcl_Interp* interp, Tcl_Obj* obj,
+				 ConnectionData* cdata,
+				 StatementData** sdataOut);
+static void RemoveAllStatementRefs(StatementData* sdata);
+static void ThawTclObj(Tcl_Obj** obj);
+static void FreezeTclObj(Tcl_Obj** obj);
 
 /* Metadata type that holds connection data */
 
@@ -533,11 +582,11 @@ const static Tcl_ObjectMetadataType connectionDataType = {
 
 /* Metadata type that flags a detach in progress */
 
-const static Tcl_ObjectMetadataType connectionDetachType = {
+const static Tcl_ObjectMetadataType connectionDestroyType = {
     TCL_OO_METADATA_VERSION_CURRENT,
 				/* version */
     "ConnectionDetaching",	/* name */
-    DeleteDetachMetadata,	/* deleteProc */
+    DeleteDestroyMetadata,	/* deleteProc */
     NULL			/* cloneProc */
 };
 
@@ -762,6 +811,26 @@ TCL_DECLARE_MUTEX(DetachedConnectionsMutex);
 static int		DetachedConnectionsSeq = 0;
 static int		DetachedConnectionsInitialized = 0;
 static Tcl_HashTable	DetachedConnections;
+
+/*
+ * Tcl_ObjType that caches prepared statements:
+ *
+ * twoPtrValue
+ *	.ptr1 = StatementData*, ptr1 owns a ref on the StatementData
+ *	.ptr2 = PGconn* to which the StatementData is associated
+ */
+
+static void FreeStatement(Tcl_Obj* obj);
+static void DupStatement(Tcl_Obj* src, Tcl_Obj* dup);
+static void UpdateStringOfStatement(Tcl_Obj* obj);
+
+Tcl_ObjType pgStatementType = {
+    "pgStatement",		/* name */
+    FreeStatement,		/* freeIntRepProc */
+    DupStatement,		/* dupIntRepProc */
+    UpdateStringOfStatement,	/* updateStringProc */
+    NULL			/* setFromAnyProc - we don't register this type */
+};
 
 /*
  *-----------------------------------------------------------------------------
@@ -1288,7 +1357,10 @@ ConfigureConnection(
 		detachedcdata = Tcl_GetHashValue(he);
 		savedpidata = cdata->pidata;
 		memcpy(cdata, detachedcdata, sizeof(ConnectionData));
+		//cdata->refCount = 1;
+		DBG("Thawed ConnectionData %s -> %s, refCount: %d\n", name(detachedcdata), name(cdata), cdata->refCount);
 		ckfree(detachedcdata);
+		FDBG("Freeing frozen ConnectionData %s, current connections: %d\n", name(detachedcdata), --g_connections);
 		detachedcdata = NULL;
 		cdata->pidata = savedpidata;
 		savedpidata = NULL;
@@ -1297,6 +1369,9 @@ ConfigureConnection(
 		he = NULL;
 	    }
 	    Tcl_MutexUnlock(&DetachedConnectionsMutex);
+	    DBG("Frozen statements in attached cdata %s ->statements %s\n%s\n", name(cdata), name(cdata->statements), Tcl_HashStats(cdata->statements));
+	    DUMP_STATEMENTS(cdata);
+
 	    if (res != TCL_OK) {
 		return res;
 	    }
@@ -1309,6 +1384,7 @@ ConfigureConnection(
 
 	cdata->statements = ckalloc(sizeof(Tcl_HashTable));
 	Tcl_InitHashTable(cdata->statements, TCL_STRING_KEYS);
+	DBG("Init cdata %s ->statements %s\n", name(cdata), name(cdata->statements));
 
 	j=0;
 	connInfo[0] = '\0';
@@ -1425,7 +1501,7 @@ static int
 ConnectionConstructor(
     ClientData clientData,	/* Environment handle */
     Tcl_Interp* interp,		/* Tcl interpreter */
-    Tcl_ObjectContext context, /* Object context */
+    Tcl_ObjectContext context,	/* Object context */
     int objc,			/* Parameter count */
     Tcl_Obj *const objv[]	/* Parameter vector */
 ) {
@@ -1440,6 +1516,7 @@ ConnectionConstructor(
     /* Hang client data on this connection */
 
     cdata = (ConnectionData*) ckalloc(sizeof(ConnectionData));
+    FDBG("Allocated ConnectionData %s, current connections: %d\n", name(cdata), ++g_connections);
     memset(cdata, 0, sizeof(ConnectionData));
     cdata->refCount = 1;
     cdata->pidata = pidata;
@@ -1491,66 +1568,73 @@ ConnectionDestructor(
 				/* The current object */
     ConnectionData* cdata = (ConnectionData*)
 	Tcl_ObjectGetMetadata(thisObject, &connectionDataType);
-    const char* detaching = Tcl_ObjectGetMetadata(thisObject,
-	    					  &connectionDetachType);
+    const char* destroytype = Tcl_ObjectGetMetadata(thisObject,
+	    					  &connectionDestroyType);
     				/* Are we detaching?  NULL if not */
-    Tcl_HashSearch	search;
-    Tcl_HashEntry*	he = NULL;
-    StatementData*	sdata = NULL;
+    Tcl_HashSearch search;
+    Tcl_HashEntry* he = NULL;
+    StatementData* sdata = NULL;
 
-    if (detaching == NULL) {
-	/*
-	 * When explicitly destroying the connection (rather than detaching
-	 * it), we must free the frozen prepared statements in
-	 * cdata->statements, or their references to our cdata will mean that
-	 * we our cdata is never freed (and nor would the statements' sdata)
-	 */
-
-	he = Tcl_FirstHashEntry(cdata->statements, &search);
-	while (he) {
-	    sdata = Tcl_GetHashValue(he);
-	    Tcl_DeleteHashEntry(he);
-	    he = NULL;
-
-	    if (sdata->subVars) {
-		ckfree(sdata->subVars);
-		sdata->subVars = NULL;
-	    }
-
-	    if (sdata->origSql) {
-		ckfree(sdata->origSql);
-		sdata->origSql = NULL;
-	    }
-
-	    if (sdata->nativeSql) {
-		ckfree(sdata->nativeSql);
-		sdata->nativeSql = NULL;
-	    }
-
-	    if (sdata->columnNames) {
-		ckfree(sdata->columnNames);
-		sdata->columnNames = NULL;
-	    }
-
-	    /*
-	     * While frozen the statement's cdata is NULL, point it to
-	     * this object so we can destroy it.
-	     */
-
-	    sdata->cdata = cdata;
-
-	    DecrStatementRefCount(sdata);
-	    sdata = NULL;
-
-	    he = Tcl_NextHashEntry(&search);
+    DBG(" ###> Connection destructor mode: %s %s, cdata: %s\n", destroytype ? destroytype : "default", name(thisObject), name(cdata));
+    if (destroytype == NULL) {
+	if (cdata == NULL) {
+	    FDBG("Connection destructor, cdata is NULL!\n");
 	}
+	if (cdata && cdata->statements) {
+	    DBG("-> Starting hash search on %s\n", name(cdata->statements));
+	    he = Tcl_FirstHashEntry(cdata->statements, &search);
+	    while (he) {
+		sdata = Tcl_GetHashValue(he);
+		Tcl_DeleteHashEntry(he);
+		he = NULL;
+
+		if (sdata->cdata == NULL) {
+		    sdata->cdata = cdata;
+		    IncrConnectionRefCount(sdata->cdata);
+
+		    /*
+		    * To survive freezing the Tcl_Objs in StatementData are reduced to
+		    * char*s.  Reverse that here.
+		    */
+
+		    ThawTclObj(&sdata->subVars);
+		    ThawTclObj(&sdata->nativeSql);
+		    ThawTclObj(&sdata->columnNames);
+		    DecrStatementRefCount(sdata);
+		    sdata = NULL;
+		}
+
+		/*
+		 * When destroying a connection instance, unlink any
+		 * statements cached in pgStatement intreps, since there is
+		 * no way it could be valid in the future anyway, and their
+		 * refs on our cdata would prevent it from being deleted.
+		 */
+
+		if (sdata) {
+		    IncrStatementRefCount(sdata);
+		    RemoveAllStatementRefs(sdata);
+		    DecrStatementRefCount(sdata);
+		    sdata = NULL;
+		}
+
+		he = Tcl_NextHashEntry(&search);
+	    }
+	    DBG("<- Finished hash search on %s\n", name(cdata->statements));
+	}
+    } else if (strcmp(destroytype, "detaching") == 0) {
     }
 
+    Tcl_ObjectSetMetadata(thisObject, &connectionDataType, NULL);
+    DBG(" <### Connection destructor mode: %s %s, cdata: %s\n", destroytype ? destroytype : "default", name(thisObject), name(cdata));
+    return TCL_OK;
+    
     /*
      * chain on to the next destructor.
      */
 
-    return Tcl_ObjectContextInvokeNext(interp, context, objc, objv, Tcl_ObjectContextSkippedArgs(context));
+    return Tcl_ObjectContextInvokeNext(interp, context, objc, objv,
+				       Tcl_ObjectContextSkippedArgs(context));
 }
 
 /*
@@ -2051,11 +2135,17 @@ ConnectionTablesMethod(
  *-----------------------------------------------------------------------------
  */
 
-static void _freezeTclObj(Tcl_Obj** obj)
-{
+static void
+FreezeTclObj(
+    Tcl_Obj** obj
+) {
     char* tmpStr = NULL;
     int tmpLen;
     Tcl_Obj* tmp = NULL;
+
+    if (*obj == NULL) {
+	return;
+    }
 
     tmp = *obj;
     *obj = NULL;	/* Transfer ref to tmp */
@@ -2068,44 +2158,18 @@ static void _freezeTclObj(Tcl_Obj** obj)
 }
 
 static int
-FreezeStatement(
+DestroyResultset(
     Tcl_Interp* interp,
-    ConnectionData* cdata,	/* Connection */
-    Tcl_Obj* stmt		/* Instance of statement class */
+    Tcl_Obj* resultset		/* Instance of resultset class */
 ) {
-    int i, new, res = TCL_OK;
-    Tcl_Object statementObject = NULL;
-    StatementData* sdata = NULL;
+    int i, res = TCL_OK;
     Tcl_Obj* cmd[2] = {NULL, NULL};
-    Tcl_HashEntry* he = NULL;
-
-    statementObject = Tcl_GetObjectFromObj(interp, stmt);
-    if (statementObject == NULL) {
-	return TCL_ERROR;
-    }
-
-    sdata = (StatementData*) Tcl_ObjectGetMetadata(statementObject,
-						   &statementDataType);
-
-    if (sdata == NULL) {
-	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
-		    "Could not retrieve StatementData metadata attached to %s",
-		    Tcl_GetString(stmt)));
-	return TCL_ERROR;
-    }
 
     /*
-     * Increment StatementData ref count (our ref will be transferred to
-     * cdata->statements
+     * Destroy the resultset instance
      */
 
-    IncrStatementRefCount(sdata);
-
-    /*
-     * Destroy the statement instance
-     */
-
-    cmd[0] = stmt;
+    cmd[0] = resultset;
     cmd[1] = Tcl_NewStringObj("destroy", 7);
     for (i = 0; i < 2; i++) {
     	Tcl_IncrRefCount(cmd[i]);
@@ -2119,32 +2183,50 @@ FreezeStatement(
 	return TCL_ERROR;
     }
 
+    return TCL_OK;
+}
+
+static int
+FreezeStatement(
+    Tcl_Interp* interp,
+    StatementData* sdata	/* Statement to freeze */
+) {
     /*
-     * Add the StatementData to the cdata->statements hash table
+     * Increment StatementData ref count.  Frozen statements have a reference
+     * from their cdata->statements entry (and nothing else).
+     *
+     * Ownership of this reference (currently for our sdata pointer) will be
+     * transferred to the the frozen statements entry.
      */
 
-    he = Tcl_CreateHashEntry(cdata->statements,
-	    Tcl_GetString(sdata->origSql), &new);
-    if (!new) {
-	DecrStatementRefCount(sdata);
-	return TCL_OK;
-    }
+    IncrStatementRefCount(sdata);
+
+    /*
+     * Unlink each pgStatement Tcl_Objs' intrep from StatementData
+     */
+
+    RemoveAllStatementRefs(sdata);
 
     /*
      * Convert each Tcl_Obj in StatementData to a char* to survive freezing
      * and future thawing in a different interp / thread
      */
 
-    _freezeTclObj(&sdata->subVars);
-    _freezeTclObj(&sdata->origSql);
-    _freezeTclObj(&sdata->nativeSql);
-    _freezeTclObj(&sdata->columnNames);
+    FreezeTclObj(&sdata->subVars);
+    FreezeTclObj(&sdata->nativeSql);
+    FreezeTclObj(&sdata->columnNames);
 
     /* cdata will be in a new location when we thaw */
 
+    DecrConnectionRefCount(sdata->cdata);
     sdata->cdata = NULL;
 
-    Tcl_SetHashValue(he, sdata);
+    /*
+     * Transfer the ref from our sdata pointer to the frozen statement entry
+     * in the statements hash table.
+     */
+
+    sdata = NULL;
 
     return TCL_OK;
 }
@@ -2172,6 +2254,52 @@ FreezeStatement(
  */
 
 static int
+FreezeStatementObject(
+    Tcl_Interp* interp,
+    Tcl_Obj* stmt		/* Instance of statement object */
+) {
+    int i, res = TCL_OK;
+    Tcl_Object statementObject = NULL;
+    StatementData* sdata = NULL;
+    Tcl_Obj* cmd[2] = {NULL, NULL};
+
+    statementObject = Tcl_GetObjectFromObj(interp, stmt);
+    if (statementObject == NULL) {
+	return TCL_ERROR;
+    }
+
+    sdata = (StatementData*) Tcl_ObjectGetMetadata(statementObject,
+						   &statementDataType);
+
+    if (sdata == NULL) {
+	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+		    "Could not retrieve StatementData metadata attached to %s",
+		    Tcl_GetString(stmt)));
+	return TCL_ERROR;
+    }
+
+    DBG("Freezing statement object %s sdata: %s/%s\n", name(stmt), name(sdata->cdata), name(sdata));
+    res = FreezeStatement(interp, sdata);
+
+    /*
+     * Destroy the statement instance
+     */
+
+    cmd[0] = stmt;
+    cmd[1] = Tcl_NewStringObj("destroy", 7);
+    for (i = 0; i < 2; i++) {
+    	Tcl_IncrRefCount(cmd[i]);
+    }
+    res = Tcl_EvalObjv(interp, 2, cmd, 0);
+    for (i = 0; i < 2; i++) {
+    	Tcl_DecrRefCount(cmd[i]);
+	cmd[i] = NULL;
+    }
+
+    return res;
+}
+
+static int
 ConnectionDetachMethod(
     ClientData clientData,	/* Completion type */
     Tcl_Interp* interp,		/* Tcl interpreter */
@@ -2189,14 +2317,17 @@ ConnectionDetachMethod(
     Tcl_Obj* statements = NULL;	/* A list from [my statements] */
     int stmtCount;		/* Length of statements list */
     Tcl_Obj** stmt = NULL;	/* Array of elements of statements list */
+    Tcl_Obj* resultsets = NULL;	/* A list from [my resultsets] */
+    int resultsetCount;		/* Length of resultsets list */
+    Tcl_Obj** resultset = NULL;	/* Array of elements of resultsets list */
     Tcl_Obj* cmd[2] = {NULL, NULL};
     				/* Tcl_Objs to eval for [self] statements */
     int i, new, res = TCL_OK;
+    Tcl_HashSearch search;	/* Our scan through the statements hash */
     Tcl_HashEntry* he = NULL;
-    char handle[20+sizeof("pqhandle")];	/* 20: longest string representation
-					 * of a 64 bit integer. \0 terminator
-					 * accounted for by sizeof
-					 */
+    StatementData* sdata = NULL;
+    				/* A statement in the statements hash */
+    Tcl_Obj* handle = NULL;
 
     /* Check parameters */
 
@@ -2205,6 +2336,8 @@ ConnectionDetachMethod(
 	res = TCL_ERROR;
 	goto finally;
     }
+
+    DBG(" ***> Detach %s, cdata: %s *** \n", name(thisObject), name(cdata));
 
     /* Find our associated prepared statements */
 
@@ -2228,9 +2361,79 @@ ConnectionDetachMethod(
 	goto finally;
     }
 
+    /* Find our associated resultsets, and destroy them */
+
+    cmd[0] = Tcl_GetObjectName(interp, thisObject);
+    cmd[1] = Tcl_NewStringObj("resultsets", sizeof("resultsets")-1);
+    for (i = 0; i < 2; i++) {
+	Tcl_IncrRefCount(cmd[i]);
+    }
+    res = Tcl_EvalObjv(interp, 2, cmd, 0);
+    for (i = 0; i < 2; i++) {
+	Tcl_DecrRefCount(cmd[i]);
+	cmd[i] = NULL;
+    }
+    if (res != TCL_OK) {
+	goto finally;
+    }
+    Tcl_IncrRefCount(resultsets = Tcl_GetObjResult(interp));
+    res = Tcl_ListObjGetElements(interp, resultsets, &resultsetCount, &resultset);
+    if (res != TCL_OK) {
+	goto finally;
+    }
+
+    for (i = 0; i < resultsetCount; i++) {
+	res = DestroyResultset(interp, resultset[i]);
+	if (res != TCL_OK) {
+	    goto finally;
+	}
+    }
+
     /*
-     *	- ensure cdata isn't shared (trying to detach while result sets
-     *		still refer to the connection)
+     * Freeze each explicitly prepared statement:
+     *	- Incref StatementData
+     *	- Destroy the statement instance
+     *	- Convert the Tcl_Obj*s in StatementData to char*s
+     */
+
+    for (i = 0; i < stmtCount; i++) {
+	res = FreezeStatementObject(interp, stmt[i]);
+	if (res != TCL_OK) {
+	    goto finally;
+	}
+    }
+
+    /*
+     * Freeze each prepared statement cached in a pgStatement ObjType intrep
+     */
+
+    DBG("-> Starting hash search on %s\n", name(cdata->statements));
+    he = Tcl_FirstHashEntry(cdata->statements, &search);
+    while (he) {
+	sdata = Tcl_GetHashValue(he);
+
+	/*
+	 * If sdata->cdata is NULL, this entry is already frozen by the
+	 * code above, or remains from a previous incarnation.
+	 */
+
+	if (sdata->cdata) {
+	    DBG("Freezing sdata cached in pgStatement Tcl_Obj: %s\n", name(sdata));
+	    res = FreezeStatement(interp, sdata);
+	    if (res != TCL_OK) {
+		goto finally;
+	    }
+	} else {
+	    DBG("Skipping already frozen statement: %s\n", name(sdata));
+	}
+	he = Tcl_NextHashEntry(&search);
+    }
+    DBG("<- Finished hash search on %s\n", name(cdata->statements));
+
+    /*
+     *	- ensure cdata isn't shared - all refs other than our instance metadata
+     *		should have been removed now.  If others remain it means that
+     *		there is a bug in this code somewhere.
      *	- freeze each statement associated with this connection
      *	- with a mutex held: {
      *	    - Create a new(!) hash entry
@@ -2241,37 +2444,28 @@ ConnectionDetachMethod(
      *	- Destroy this connection object
      */
 
-    if (cdata->refCount - stmtCount > 1) {
-
-	/* TODO: possibly kill these proactively?  */
-
-	Tcl_SetObjResult(interp, Tcl_ObjPrintf("Can't detach while result sets are still open"));
+    if (cdata->refCount > 1) {
+	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+		    "Could not detach connection because references remain: %d",
+		    cdata->refCount));
+	//raise(SIGTRAP);
 	res = TCL_ERROR;
 	goto finally;
     }
 
-    /*
-     * Freeze each associated prepared statement:
-     *	- Incref StatementData
-     *	- Destroy the statement instance
-     *	- Convert the Tcl_Obj*s in StatementData to char*s
-     *	- Add StatementData to cdata->statements hash table
-     */
-
-    for (i = 0; i < stmtCount; i++) {
-	FreezeStatement(interp, cdata, stmt[i]);
-    }
-
     Tcl_MutexLock(&DetachedConnectionsMutex);
-    snprintf(handle, 20+sizeof("pqhandle"), "pqhandle%d", ++DetachedConnectionsSeq);
-    he = Tcl_CreateHashEntry(&DetachedConnections, handle, &new);
+    handle = Tcl_ObjPrintf("pqhandle%d", ++DetachedConnectionsSeq);
+    Tcl_IncrRefCount(handle);
+    he = Tcl_CreateHashEntry(&DetachedConnections, Tcl_GetString(handle), &new);
     if (new) {
 	DecrPerInterpRefCount(cdata->pidata);
 	cdata->pidata = NULL;
 	IncrConnectionRefCount(cdata);
 	Tcl_SetHashValue(he, cdata);
     } else {
-	Tcl_SetObjResult(interp, Tcl_ObjPrintf("Generated a handle but it wasn't new: \"%s\"", handle));
+	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+		    "Generated a handle but it wasn't new: \"%s\"",
+		    Tcl_GetString(handle)));
 	res = TCL_ERROR;
     }
     Tcl_MutexUnlock(&DetachedConnectionsMutex);
@@ -2279,17 +2473,25 @@ ConnectionDetachMethod(
 	goto finally;
     }
 
+
     /*
-     * Flag this object as being in a detach state, so that the destructor
-     * knows not to DecrRef the statements hash table entries.
+     * For reasons I haven't figured out yet, sometimes the
+     * Tcl_DeleteCommandFromToken below directly runs the destructor, and
+     * sometimes it just seems to delete name namespace, detach the metadata
+     * and return to us, and then our destructor runs after we return (now sans
+     * metadata).  So we attach the connectionDestroyType twice: once before
+     * the Tcl_DeleteCommandFromToken and again after it, so that whenever
+     * our destructor runs it knows not to clean out cdata->statements.
      */
 
-    Tcl_ObjectSetMetadata(thisObject, &connectionDetachType, "detaching");
+    Tcl_ObjectSetMetadata(thisObject, &connectionDestroyType, "detaching");
 
-    /* Delete our object command for the side-effect of destroying this object
+    /*
+     * Delete our object command for the side-effect of destroying this object
      * TODO: is there a more direct way to do this?
      */
 
+    DBG("cdata before delete command: %s\n", name(Tcl_ObjectGetMetadata(thisObject, &connectionDataType)));
     if (Tcl_DeleteCommandFromToken(interp, thisObjectCommand) != TCL_OK) {
 
 	/* TODO: Tcl_Panic rather?  Things are in an inconsistent state */
@@ -2298,15 +2500,33 @@ ConnectionDetachMethod(
 	res = TCL_ERROR;
 	goto finally;
     }
+    DBG("cdata after delete command: %s\n", name(Tcl_ObjectGetMetadata(thisObject, &connectionDataType)));
 
-    Tcl_SetObjResult(interp, Tcl_NewStringObj(handle, -1));
+    /*
+     * Flag this object as being in a detach state, so that the destructor
+     * knows not to DecrRef the statements hash table entries.
+     */
+
+    Tcl_ObjectSetMetadata(thisObject, &connectionDestroyType, "detaching");
+
+    DBG("Detach successful, returning handle (%s)\n", Tcl_GetString(handle));
+    Tcl_SetObjResult(interp, handle);
 
  finally:
     if (statements) {
 	Tcl_DecrRefCount(statements);
 	statements = NULL;
     }
+    if (resultsets) {
+	Tcl_DecrRefCount(resultsets);
+	resultsets = NULL;
+    }
+    if (handle) {
+	Tcl_DecrRefCount(handle);
+	handle = NULL;
+    }
 
+    DBG(" <*** Detach %s, cdata: %s *** \n", name(thisObject), name(cdata));
     return res;
 }
 
@@ -2393,14 +2613,33 @@ static void
 DeleteConnection(
     ConnectionData* cdata	/* Instance data for the connection */
 ) {
+    Tcl_HashSearch	search;
+    Tcl_HashEntry*	he = NULL;
+
+    FDBG("===> Enter DeleteConnection %s\n", name(cdata));
+    if (cdata->statements) {
+	he = Tcl_FirstHashEntry(cdata->statements, &search);
+	if (he) {
+	    Tcl_Panic("No entries should remain in cdata->statements");
+	}
+
+	DBG("DeleteHashTable %s ->statements %s\n", name(cdata), name(cdata->statements));
+	Tcl_DeleteHashTable(cdata->statements);
+	ckfree(cdata->statements);
+	cdata->statements = NULL;
+    }
+
     if (cdata->pgPtr != NULL) {
+	/* pgPtr can be NULL if the constructor failed before connecting */
 	PQfinish(cdata->pgPtr);
+	cdata->pgPtr = NULL;
     }
     DecrPerInterpRefCount(cdata->pidata);
+    cdata->pidata = NULL;
+    
     ckfree(cdata);
-    Tcl_DeleteHashTable(cdata->statements);
-    ckfree(cdata->statements);
-    cdata->statements = NULL;
+    FDBG("Deleted connection %s, remaining connections: %d\n", name(cdata), --g_connections);
+    FDBG("<=== Leave DeleteConnection %s\n", name(cdata));
 }
 
 /*
@@ -2557,7 +2796,8 @@ NewStatement(
     memset(sdata, 0, sizeof(StatementData));
     sdata->refCount = 1;
     sdata->cdata = cdata;
-    IncrConnectionRefCount(cdata);
+    DBG("Taking a ref on cdata %s for sdata %s, statements existing: %d\n", name(cdata), name(sdata), ++g_statements);
+    IncrConnectionRefCount(sdata->cdata);
     sdata->subVars = Tcl_NewObj();
     Tcl_IncrRefCount(sdata->subVars);
     sdata->params = NULL;
@@ -2568,6 +2808,7 @@ NewStatement(
     sdata->flags = 0;
     sdata->stmtName = GenStatementName(cdata);
     sdata->paramTypesChanged = 0;
+    sdata->pgStatement = NULL;
 
     return sdata;
 }
@@ -2724,23 +2965,6 @@ ResultDescToTcl(
  *-----------------------------------------------------------------------------
  */
 
-static void
-_thawTclObj(
-    Tcl_Obj** obj
-) {
-    char* frozenStr = NULL;	/* Frozen string while replacing with Tcl_Obj */
-
-    if (*obj == NULL) {
-	return;
-    }
-
-    frozenStr = (char*)*obj;
-    *obj = Tcl_NewStringObj(frozenStr, -1);
-    Tcl_IncrRefCount(*obj);
-    ckfree(frozenStr);
-    frozenStr = NULL;
-}
-
 static int
 StatementConstructor(
     ClientData clientData,	/* Not used */
@@ -2759,198 +2983,44 @@ StatementConstructor(
     ConnectionData* cdata;	/* The connection object's data */
     StatementData* sdata = NULL;
     				/* The statement's object data */
-    Tcl_Obj* tokens = NULL;	/* The tokens of the statement to be prepared */
-    int tokenc;			/* Length of the 'tokens' list */
-    Tcl_Obj** tokenv;		/* Exploded tokens from the list */
-    Tcl_Obj* nativeSql = NULL;	/* SQL statement mapped to native form */
-    Tcl_Obj* subVars = NULL;	/* Substition variables, in order */
-    char* tokenStr;		/* Token string */
-    int tokenLen;		/* Length of a token */
-    PGresult* res;		/* Temporary result of libpq calls */
-    char tmpstr[30];		/* Temporary array for strings */
-    Tcl_HashEntry* he = NULL;	/* Frozen prepared statement */
-    int i,j;
-
 
     /* Find the connection object, and get its data. */
 
     thisObject = Tcl_ObjectContextObject(context);
     if (objc != skip+2) {
 	Tcl_WrongNumArgs(interp, skip, objv, "connection statementText");
-	goto err;
+	return TCL_ERROR;
     }
 
     connectionObject = Tcl_GetObjectFromObj(interp, objv[skip]);
     if (connectionObject == NULL) {
-	goto err;
+	return TCL_ERROR;
     }
     cdata = (ConnectionData*) Tcl_ObjectGetMetadata(connectionObject,
 						    &connectionDataType);
     if (cdata == NULL) {
 	Tcl_AppendResult(interp, Tcl_GetString(objv[skip]),
 			 " does not refer to a Postgres connection", NULL);
-	goto err;
+	return TCL_ERROR;
     }
 
     /*
-     * Look for a frozen (previously detached) prepared statement.
-     * Consume the frozen statement if found (to make the ref counting work).
+     * All the work is done by the GetPgStatementFromObj, which will
+     * cache the StatementData in objv[skip+1] for future calls
      */
 
-    he = Tcl_FindHashEntry(cdata->statements, Tcl_GetString(objv[skip+1]));
-    if (he) {
-	sdata = Tcl_GetHashValue(he);
-
-	/* Transfer sdata ref from the hash table to us */
-
-	Tcl_DeleteHashEntry(he);
-	he = NULL;
-
-	/* cdata ref points at a stale location, fix it */
-
-	sdata->cdata = cdata;
-
-	/*
-	 * To survive freezing the Tcl_Objs in StatementData are reduced to
-	 * char*s.  Reverse that here.
-	 */
-
-	_thawTclObj(&sdata->subVars);
-	_thawTclObj(&sdata->origSql);
-	_thawTclObj(&sdata->nativeSql);
-	_thawTclObj(&sdata->columnNames);
-    } else {
-
-	/* Tokenize the statement */
-
-	tokens = Tdbc_TokenizeSql(interp, Tcl_GetString(objv[skip+1]));
-	if (tokens == NULL) {
-	    goto err;
-	}
-	Tcl_IncrRefCount(tokens);
-
-	/*
-	* Rewrite the tokenized statement to Postgres syntax. Reject the
-	* statement if it is actually multiple statements.
-	*/
-
-	if (Tcl_ListObjGetElements(interp, tokens, &tokenc, &tokenv) != TCL_OK) {
-	    goto err;
-	}
-
-	nativeSql = Tcl_NewObj();
-	Tcl_IncrRefCount(nativeSql);
-
-	subVars = Tcl_NewListObj(0, NULL);
-	Tcl_IncrRefCount(subVars);
-	
-	j=0;
-
-	for (i = 0; i < tokenc; ++i) {
-	    tokenStr = Tcl_GetStringFromObj(tokenv[i], &tokenLen);
-
-	    switch (tokenStr[0]) {
-	    case '$':
-	    case ':':
-		/*
-		* A PostgreSQL cast is not a parameter!
-		*/
-		if (tokenStr[0] == ':' && tokenStr[1] == tokenStr[0]) {
-		    Tcl_AppendToObj(nativeSql, tokenStr, tokenLen);
-		    break;
-		}
-
-		j+=1;
-		snprintf(tmpstr, 30, "$%d", j);
-		Tcl_AppendToObj(nativeSql, tmpstr, -1);
-		Tcl_ListObjAppendElement(NULL, subVars,
-					Tcl_NewStringObj(tokenStr+1, tokenLen-1));
-		break;
-
-	    case ';':
-		Tcl_SetObjResult(interp,
-				Tcl_NewStringObj("tdbc::postgres"
-						" does not support semicolons "
-						"in statements", -1));
-		goto err;
-		break;
-
-	    default:
-		Tcl_AppendToObj(nativeSql, tokenStr, tokenLen);
-		break;
-
-	    }
-	}
-
-	Tcl_DecrRefCount(tokens);
-	tokens = NULL;
-
-	/*
-	* Allocate an object to hold data about this statement
-	*/
-
-	sdata = NewStatement(cdata);
-
-	sdata->origSql = objv[skip+1];
-	Tcl_IncrRefCount(sdata->origSql);
-
-	sdata->nativeSql = nativeSql;
-	nativeSql = NULL;
-	sdata->subVars = subVars;
-	subVars = NULL;
-
-	Tcl_ListObjLength(NULL, sdata->subVars, &sdata->nParams);
-	sdata->params = (ParamData*) ckalloc(sdata->nParams * sizeof(ParamData));
-	memset(sdata->params, 0, sdata->nParams * sizeof(ParamData));
-	sdata->paramDataTypes = (Oid*) ckalloc(sdata->nParams * sizeof(Oid));
-	memset(sdata->paramDataTypes, 0, sdata->nParams * sizeof(Oid));
-	for (i = 0; i < sdata->nParams; ++i) {
-	    sdata->params[i].flags = PARAM_IN;
-	    sdata->paramDataTypes[i] = UNTYPEDOID ;
-	    sdata->params[i].precision = 0;
-	    sdata->params[i].scale = 0;
-	}
-
-	/* Prepare the statement */
-
-	res = PrepareStatement(interp, sdata, NULL);
-	if (res == NULL) {
-	    goto err;
-	}
-	if (TransferResultError(interp, res) != TCL_OK) {
-	    PQclear(res);
-	    goto err;
-	}
-
-	PQclear(res);
+    TIME("GetPgStatementFromObj",
+    if (GetPgStatementFromObj(interp, objv[skip+1], cdata, &sdata) != TCL_OK) {
+	return TCL_ERROR;
     }
+    );
 
     /* Attach the current statement data as metadata to the current object */
 
+    IncrStatementRefCount(sdata);
     Tcl_ObjectSetMetadata(thisObject, &statementDataType, (ClientData) sdata);
 
     return TCL_OK;
-
-    /* On error, unwind all the resource allocations */
-
- err:
-    if (nativeSql) {
-	Tcl_DecrRefCount(nativeSql);
-	nativeSql = NULL;
-    }
-    if (subVars) {
-	Tcl_DecrRefCount(subVars);
-	subVars = NULL;
-    }
-    if (tokens) {
-	Tcl_DecrRefCount(tokens);
-	tokens = NULL;
-    }
-    if (sdata) {
-	DecrStatementRefCount(sdata);
-	sdata = NULL;
-    }
-    return TCL_ERROR;
 }
 
 /*
@@ -3200,6 +3270,9 @@ static void
 DeleteStatement(
     StatementData* sdata	/* Metadata for the statement */
 ) {
+    Tcl_HashEntry* he = NULL;
+
+    DBG("  ==> DeleteStatement %s\n", name(sdata));
     if (sdata->columnNames != NULL) {
 	Tcl_DecrRefCount(sdata->columnNames);
     }
@@ -3210,6 +3283,29 @@ DeleteStatement(
     if (sdata->nativeSql != NULL) {
 	Tcl_DecrRefCount(sdata->nativeSql);
     }
+    if (sdata->origSql != NULL) {
+	/*
+	 * Non-frozen entries in the statements hash table don't hold
+	 * references to sdata, so when the refcount goes to zero
+	 * we remove the entry from the hash.  This way the the
+	 * statements hash contains only the currently referenced
+	 * statements (as metadata for statement objects, or intrep
+	 * for pgStatement ObjTypes), or frozen statements from
+	 * previous incarnations.
+	 *
+	 * If we're here and sdata->cdata is NULL it means that the
+	 * connection is being explicitly destroyed and the connection
+	 * destructor will take care of removing the hash entries itself.
+	 */
+	if (sdata->cdata) {
+	    he = Tcl_FindHashEntry(sdata->cdata->statements, sdata->origSql);
+	    if (he) {
+		Tcl_DeleteHashEntry(he);
+	    }
+	}
+	ckfree(sdata->origSql);
+	sdata->origSql = NULL;
+    }
     if (sdata->params != NULL) {
 	ckfree(sdata->params);
     }
@@ -3219,8 +3315,18 @@ DeleteStatement(
     if (sdata->subVars != NULL) {
 	Tcl_DecrRefCount(sdata->subVars);
     }
-    DecrConnectionRefCount(sdata->cdata);
+    if (sdata->cdata) {
+	/*
+	 * sdata->cdata == NULL means this statement is frozen, and doesn't
+	 * hold a reference to cdata (which will have moved location when
+	 * we're thawed anyway).  The dependency on cdata->pgPtr for prepared
+	 * statements is implicit in that the only way to reach a frozen
+	 * statement is via the correct cdata's statements hash table.
+	 */
+	DecrConnectionRefCount(sdata->cdata);
+    }
     ckfree(sdata);
+    DBG("  <== DeleteStatement %s, statements remaining: %d\n", name(sdata), --g_statements);
 }
 
 /*
@@ -3251,6 +3357,469 @@ CloneStatement(
     Tcl_SetObjResult(interp,
 		     Tcl_NewStringObj("Postgres statements are not clonable",
 				      -1));
+    return TCL_ERROR;
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * AddStatementRef --
+ *
+ *	Adds obj as a reference to sdata in the pgStatement linked list,
+ *	and increments the StatementData ref count
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+AddStatementRef(
+    Tcl_Obj* obj,
+    StatementData* sdata
+) {
+    struct pgStatementRef* myRef = ckalloc(sizeof(struct pgStatementRef));
+
+    myRef->obj = obj;
+    DBG("Adding obj statement ref: %s: %s\n", name(obj), Tcl_GetString(obj));
+    myRef->next = sdata->pgStatement;
+    sdata->pgStatement = myRef;
+    IncrStatementRefCount(sdata);
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * RemoveStatementRef --
+ *
+ *	Removes obj as a reference to sdata from the pgStatement linked list,
+ *	and decrements the StatementData ref count (if a ref to obj was found).
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+RemoveStatementRef(
+    Tcl_Obj* obj,
+    StatementData* sdata
+) {
+    struct pgStatementRef* p = sdata->pgStatement;
+    struct pgStatementRef* t = NULL;
+
+    if (p == NULL) return;
+
+    if (p->obj == obj) {
+	sdata->pgStatement = p->next;
+	ckfree(p);
+	p = NULL;
+	DecrStatementRefCount(sdata);
+	return;
+    }
+
+    while (p->next && p->next->obj != obj) {
+	p = p->next;
+    }
+
+    if (p->next == NULL) {
+	return;
+    }
+
+    t = p->next;
+    p->next = p->next->next;
+    ckfree(t);
+    t = NULL;
+    DecrStatementRefCount(sdata);
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * RemoveAllStatementRefs --
+ *
+ *	Removes all pgStatement Intrep refs from sdata, invalidating the
+ *	referring objects' intreps and decrementing the StatementData for
+ *	each removed reference.
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+RemoveAllStatementRefs(
+    StatementData* sdata
+) {
+    struct pgStatementRef* p = sdata->pgStatement;
+    struct pgStatementRef* n = NULL;
+    Tcl_ObjIntRep* ir = NULL;
+
+    sdata->pgStatement = NULL;
+
+    while (p) {
+	ir = Tcl_FetchIntRep(p->obj, &pgStatementType);
+	if (ir) {
+	    if (ir->twoPtrValue.ptr1) {
+		DBG("\t  Unlinking pgStatement Tcl_Obj %s from %s/%s\n", name(p->obj), name(sdata->cdata), name(sdata));
+		DecrStatementRefCount((StatementData*) ir->twoPtrValue.ptr1);
+		ir->twoPtrValue.ptr1 = NULL;
+	    }
+	    ir->twoPtrValue.ptr2 = NULL;
+	}
+	
+	n = p->next;
+	p->obj = NULL;
+	p->next = NULL;
+	ckfree(p);
+	p = n;
+    }
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * FreeStatement --
+ *
+ *	Frees a pgStatement ObjType intrep
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+FreeStatement(
+    Tcl_Obj* obj
+) {
+    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(obj, &pgStatementType);
+    StatementData* sdata = ir->twoPtrValue.ptr1;
+
+    DBG("FreeIntRep on pgStatement %s\n", name(obj));
+    if (ir->twoPtrValue.ptr1) {
+	/*
+	 * May be NULL already if the StatementData was unlinked from this
+	 * intrep when the associated connection was frozen.
+	 */
+	RemoveStatementRef(obj, sdata);
+    }
+    ir->twoPtrValue.ptr1 = NULL;
+    ir->twoPtrValue.ptr2 = NULL;
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * DupStatement --
+ *
+ *	Duplicates a pgStatement ObjType intrep
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+DupStatement(
+    Tcl_Obj* src,
+    Tcl_Obj* dup
+) {
+    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(src, &pgStatementType);
+    StatementData* sdata = ir->twoPtrValue.ptr1;
+
+    AddStatementRef(dup, sdata);
+    Tcl_StoreIntRep(dup, &pgStatementType, ir);
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * UpdateStringOfStatement --
+ *
+ *	Duplicates a pgStatement ObjType intrep
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+UpdateStringOfStatement(
+    Tcl_Obj* obj
+) {
+    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(obj, &pgStatementType);
+    StatementData* sdata = ir->twoPtrValue.ptr1;
+
+    Tcl_InitStringRep(obj, sdata->origSql, strlen(sdata->origSql));
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * GetPgStatementFromObj --
+ *
+ *	Duplicates a pgStatement ObjType intrep
+ *
+ * Results:
+ *	None
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static void
+ThawTclObj(
+    Tcl_Obj** obj
+) {
+    char* frozenStr = NULL;	/* Frozen string while replacing with Tcl_Obj */
+
+    if (*obj == NULL) {
+	return;
+    }
+
+    frozenStr = (char*)*obj;
+    *obj = Tcl_NewStringObj(frozenStr, -1);
+    Tcl_IncrRefCount(*obj);
+    ckfree(frozenStr);
+    frozenStr = NULL;
+}
+
+static int
+GetPgStatementFromObj(
+    Tcl_Interp* interp,
+    Tcl_Obj* obj,
+    ConnectionData* cdata,
+    StatementData** sdataOut
+) {
+    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(obj, &pgStatementType);
+    Tcl_ObjIntRep newIr;
+    StatementData* sdata = NULL;
+    Tcl_Obj* tokens = NULL;	/* The tokens of the statement to be prepared */
+    int tokenc;			/* Length of the 'tokens' list */
+    Tcl_Obj** tokenv;		/* Exploded tokens from the list */
+    Tcl_Obj* nativeSql = NULL;	/* SQL statement mapped to native form */
+    Tcl_Obj* subVars = NULL;	/* Substition variables, in order */
+    char* tokenStr;		/* Token string */
+    int tokenLen;		/* Length of a token */
+    char tmpstr[30];		/* Temporary array for strings */
+    PGresult* res;		/* Temporary result of libpq calls */
+    Tcl_HashEntry* he = NULL;	/* Frozen prepared statement */
+    int i, j, new;
+    const char* origSql = NULL;
+    int origSqlLen;
+
+    DBG("GetPgStatementFromObj %s \"%s\"\n", name(obj), Tcl_GetString(obj));
+    /*
+     * Cached StatementData is only valid if the pgPtr matches the connection
+     * we used to prepare.  If ptr1 is NULL then the StatementData was unlinked
+     * from under us and we need to regenerate it.
+     */
+    if (ir && ir->twoPtrValue.ptr1 && ir->twoPtrValue.ptr2 == cdata->pgPtr) {
+	*sdataOut = ir->twoPtrValue.ptr1;
+	return TCL_OK;
+    }
+
+    /*
+     * Not a pgStatementType, or not valid for this ConnectionData:
+     * attempt to convert it to one.
+     *
+     * Look for a frozen (previously detached) prepared statement.
+     */
+
+    he = Tcl_CreateHashEntry(cdata->statements, Tcl_GetString(obj), &new);
+    if (!new) {
+	sdata = Tcl_GetHashValue(he);
+	DBG("\tRetrieved StatementData from statements hash: %s\n", name(sdata));
+	IncrStatementRefCount(sdata);	/* For sdata pointer */
+
+	if (sdata->cdata == NULL) {
+	    DBG("\t\tWas frozen, thawing\n");
+	    /* cdata == NULL means this statement was frozen, thaw it */
+
+	    sdata->cdata = cdata;
+	    IncrConnectionRefCount(sdata->cdata);
+
+	    /*
+	     * To survive freezing the Tcl_Objs in StatementData are reduced to
+	     * char*s.  Reverse that here.
+	     */
+
+	    ThawTclObj(&sdata->subVars);
+	    ThawTclObj(&sdata->nativeSql);
+	    ThawTclObj(&sdata->columnNames);
+
+	    /* Frozen entries in the hash have their own references
+	     * (nothing else references them).  Thawed ones don't,
+	     * remove the cdata->statements ref now that we've thawed
+	     * this one.
+	     */
+	    DecrStatementRefCount(sdata);
+	}
+    } else {
+	DBG("query not found in cdata->statements: %s, existing statements:\n", Tcl_GetString(obj));
+	DUMP_STATEMENTS(cdata);
+
+	/* Tokenize the statement */
+
+	tokens = Tdbc_TokenizeSql(interp, Tcl_GetString(obj));
+	if (tokens == NULL) {
+	    goto err;
+	}
+	Tcl_IncrRefCount(tokens);
+
+	/*
+	 * Rewrite the tokenized statement to Postgres syntax. Reject the
+	 * statement if it is actually multiple statements.
+	 */
+
+	if (Tcl_ListObjGetElements(interp, tokens, &tokenc, &tokenv) != TCL_OK) {
+	    goto err;
+	}
+
+	nativeSql = Tcl_NewObj();
+	Tcl_IncrRefCount(nativeSql);
+
+	subVars = Tcl_NewListObj(0, NULL);
+	Tcl_IncrRefCount(subVars);
+	
+	j=0;
+
+	for (i = 0; i < tokenc; ++i) {
+	    tokenStr = Tcl_GetStringFromObj(tokenv[i], &tokenLen);
+
+	    switch (tokenStr[0]) {
+	    case '$':
+	    case ':':
+		/*
+		 * A PostgreSQL cast is not a parameter!
+		 */
+		if (tokenStr[0] == ':' && tokenStr[1] == tokenStr[0]) {
+		    Tcl_AppendToObj(nativeSql, tokenStr, tokenLen);
+		    break;
+		}
+
+		j+=1;
+		snprintf(tmpstr, 30, "$%d", j);
+		Tcl_AppendToObj(nativeSql, tmpstr, -1);
+		Tcl_ListObjAppendElement(NULL, subVars,
+					Tcl_NewStringObj(tokenStr+1, tokenLen-1));
+		break;
+
+	    case ';':
+		Tcl_SetObjResult(interp,
+				Tcl_NewStringObj("tdbc::postgres"
+						" does not support semicolons "
+						"in statements", -1));
+		goto err;
+		break;
+
+	    default:
+		Tcl_AppendToObj(nativeSql, tokenStr, tokenLen);
+		break;
+
+	    }
+	}
+
+	Tcl_DecrRefCount(tokens);
+	tokens = NULL;
+
+	/*
+	 * Allocate an object to hold data about this statement
+	 */
+
+	sdata = NewStatement(cdata);
+	DBG("\nCreated fresh StatementData: %s\n", name(sdata));
+
+	/*
+	 * Can't point origSql to obj - it would be a circular reference (obj
+	 * referenced in obj's intrep), so it would never be freed
+	 */
+	origSql = Tcl_GetStringFromObj(obj, &origSqlLen);
+	sdata->origSql = ckalloc(origSqlLen+1);
+	memcpy(sdata->origSql, origSql, origSqlLen+1);
+
+	sdata->nativeSql = nativeSql;
+	nativeSql = NULL;
+	sdata->subVars = subVars;
+	subVars = NULL;
+
+	Tcl_ListObjLength(NULL, sdata->subVars, &sdata->nParams);
+	sdata->params = (ParamData*) ckalloc(sdata->nParams * sizeof(ParamData));
+	memset(sdata->params, 0, sdata->nParams * sizeof(ParamData));
+	sdata->paramDataTypes = (Oid*) ckalloc(sdata->nParams * sizeof(Oid));
+	memset(sdata->paramDataTypes, 0, sdata->nParams * sizeof(Oid));
+	for (i = 0; i < sdata->nParams; ++i) {
+	    sdata->params[i].flags = PARAM_IN;
+	    sdata->paramDataTypes[i] = UNTYPEDOID ;
+	    sdata->params[i].precision = 0;
+	    sdata->params[i].scale = 0;
+	}
+
+	/* Prepare the statement */
+
+	res = PrepareStatement(interp, sdata, NULL);
+	if (res == NULL) {
+	    goto err;
+	}
+	if (TransferResultError(interp, res) != TCL_OK) {
+	    PQclear(res);
+	    goto err;
+	}
+
+	PQclear(res);
+
+	/* Record this statement in the connection's statements hash table */
+
+	DBG("Recording %s/%s in cdata->statements\n", name(cdata), name(sdata));
+	Tcl_SetHashValue(he, sdata);
+    }
+
+    newIr.twoPtrValue.ptr1 = sdata;
+    newIr.twoPtrValue.ptr2 = cdata->pgPtr;
+    Tcl_StoreIntRep(obj, &pgStatementType, &newIr);
+
+    /* Add a ref for our intrep */
+
+    AddStatementRef(obj, sdata);
+
+    /* Drop the ref for our sdata pointer */
+
+    DecrStatementRefCount(sdata);
+    sdata = NULL;
+
+    *sdataOut = newIr.twoPtrValue.ptr1;
+
+    return TCL_OK;
+
+
+    /* On error, unwind all the resource allocations */
+
+ err:
+    if (nativeSql) {
+	Tcl_DecrRefCount(nativeSql);
+	nativeSql = NULL;
+    }
+    if (subVars) {
+	Tcl_DecrRefCount(subVars);
+	subVars = NULL;
+    }
+    if (tokens) {
+	Tcl_DecrRefCount(tokens);
+	tokens = NULL;
+    }
+    if (new && he) {
+	Tcl_DeleteHashEntry(he);
+	he = NULL;
+    }
+    if (sdata) {
+	DecrStatementRefCount(sdata);
+	sdata = NULL;
+    }
     return TCL_ERROR;
 }
 
@@ -3881,6 +4450,7 @@ Tdbcpostgres_Init(
     Tcl_Class curClass;		/* Tcl_Class representing the current class */
     int i;
 
+    DBG("Tdbcpostgres_Init\n");
     if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) {
 	return TCL_ERROR;
     }
