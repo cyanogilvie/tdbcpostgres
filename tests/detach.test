@@ -221,49 +221,6 @@ test detach-3.2 {Refreeze, statements preserved} {*}{
     -result {1 prepared 0 0 prepared faster}
 }
 
-test detach-3.3 {Refreeze, statements preserved, use statement after connection destroy} {*}{
-    -setup {
-	tdbc::postgres::connection create ::db_detach-3.1a {*}$connFlags
-    }
-    -body {
-	set res {}
-	set first	[lindex [time {
-	    set stmt	[::db_detach-3.1a prepare {select 'prepared'}]
-	}] 0]
-	lappend res	[info object isa object $stmt]
-	lappend res	[$stmt allrows -as lists]
-	set detachedhandle	[::db_detach-3.1a detach]
-	lappend res	[info object isa object ::db_detach-3.1a]
-	
-	tdbc::postgres::connection create ::db_detach-3.1b -attach $detachedhandle
-	set detachedhandle	[::db_detach-3.1b detach]
-
-	tdbc::postgres::connection create ::db_detach-3.1c -attach $detachedhandle
-	lappend res	[info object isa object $stmt]
-	set second	[lindex [time {
-	    set stmt	[::db_detach-3.1c prepare {select 'prepared'}]
-	}] 0]
-	rename ::db_detach-3.1c {}
-	lappend res	[info object isa object $stmt]
-	lappend res	[$stmt allrows -as lists]
-
-	puts "first: $first, second: $second"
-	lappend res [expr {
-	    $second < $first / 4
-	    	? "faster"
-		: "First prepare: $first, second: $second"
-	}]
-	set res
-    }
-    -cleanup {
-	unset -nocomplain detachedhandle res first second
-	if {[info object isa object ::db_detach-3.1a]} { rename ::db_detach-3.1a {} }
-	if {[info object isa object ::db_detach-3.1b]} { rename ::db_detach-3.1b {} }
-	if {[info object isa object ::db_detach-3.1c]} { rename ::db_detach-3.1c {} }
-    }
-    -result {1 prepared 0 0 1 prepared faster}
-}
-
 test detach-3.4 {Refreeze, pgStatements preserved} {*}{
     -setup {
 	tdbc::postgres::connection create ::db_detach-3.1a {*}$connFlags
@@ -286,7 +243,7 @@ test detach-3.4 {Refreeze, pgStatements preserved} {*}{
 
 	puts "first: $first, second: $second"
 	lappend res [expr {
-	    $second < $first / 4
+	    $second < $first / 2
 	    	? "faster"
 		: "First prepare: $first, second: $second"
 	}]

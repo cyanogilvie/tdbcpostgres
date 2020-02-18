@@ -373,7 +373,7 @@ typedef struct StatementData {
     Oid* paramDataTypes;	/* Param data types list */
     int paramTypesChanged;	/* Indicator of changed param types */
     int flags;
-    struct pgStatementRef* pgStatement;
+    struct pgStatementRef* pgStatements;
     				/* Linked list of pgStatement objs so
 				 * we can expire their intreps when
 				 * detaching or destroying a connection */
@@ -1369,7 +1369,7 @@ ConfigureConnection(
 		he = NULL;
 	    }
 	    Tcl_MutexUnlock(&DetachedConnectionsMutex);
-	    DBG("Frozen statements in attached cdata %s ->statements %s\n%s\n", name(cdata), name(cdata->statements), Tcl_HashStats(cdata->statements));
+	    DBG("Frozen statements in attached cdata %s ->statements %s\n", name(cdata), name(cdata->statements));
 	    DUMP_STATEMENTS(cdata);
 
 	    if (res != TCL_OK) {
@@ -2808,7 +2808,7 @@ NewStatement(
     sdata->flags = 0;
     sdata->stmtName = GenStatementName(cdata);
     sdata->paramTypesChanged = 0;
-    sdata->pgStatement = NULL;
+    sdata->pgStatements = NULL;
 
     return sdata;
 }
@@ -3314,6 +3314,7 @@ DeleteStatement(
     }
     if (sdata->subVars != NULL) {
 	Tcl_DecrRefCount(sdata->subVars);
+	sdata->subVars = NULL;
     }
     if (sdata->cdata) {
 	/*
@@ -3383,8 +3384,8 @@ AddStatementRef(
 
     myRef->obj = obj;
     DBG("Adding obj statement ref: %s: %s\n", name(obj), Tcl_GetString(obj));
-    myRef->next = sdata->pgStatement;
-    sdata->pgStatement = myRef;
+    myRef->next = sdata->pgStatements;
+    sdata->pgStatements = myRef;
     IncrStatementRefCount(sdata);
 }
 
@@ -3407,13 +3408,13 @@ RemoveStatementRef(
     Tcl_Obj* obj,
     StatementData* sdata
 ) {
-    struct pgStatementRef* p = sdata->pgStatement;
+    struct pgStatementRef* p = sdata->pgStatements;
     struct pgStatementRef* t = NULL;
 
     if (p == NULL) return;
 
     if (p->obj == obj) {
-	sdata->pgStatement = p->next;
+	sdata->pgStatements = p->next;
 	ckfree(p);
 	p = NULL;
 	DecrStatementRefCount(sdata);
@@ -3454,11 +3455,11 @@ static void
 RemoveAllStatementRefs(
     StatementData* sdata
 ) {
-    struct pgStatementRef* p = sdata->pgStatement;
+    struct pgStatementRef* p = sdata->pgStatements;
     struct pgStatementRef* n = NULL;
     Tcl_ObjIntRep* ir = NULL;
 
-    sdata->pgStatement = NULL;
+    sdata->pgStatements = NULL;
 
     while (p) {
 	ir = Tcl_FetchIntRep(p->obj, &pgStatementType);
