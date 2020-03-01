@@ -2620,7 +2620,12 @@ DeleteConnection(
     if (cdata->statements) {
 	he = Tcl_FirstHashEntry(cdata->statements, &search);
 	if (he) {
-	    Tcl_Panic("No entries should remain in cdata->statements");
+	    Tcl_Obj*	remaining = Tcl_NewObj();
+
+	    do {
+		Tcl_AppendObjToObj(remaining, Tcl_GetHashValue(he));
+	    } while((he = Tcl_NextHashEntry(&search)));
+	    Tcl_Panic("No entries should remain in cdata->statements:", Tcl_GetString(remaining));
 	}
 
 	DBG("DeleteHashTable %s ->statements %s\n", name(cdata), name(cdata->statements));
