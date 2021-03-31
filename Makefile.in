@@ -357,6 +357,9 @@ dist: dist-clean
 	$(DIST_INSTALL_DATA) $(srcdir)/generic/fakepq.h $(srcdir)/generic/pqStubDefs.txt \
 		$(srcdir)/generic/pqStubInit.c $(srcdir)/generic/pqStubs.h \
 		$(srcdir)/generic/tdbcpostgres.c \
+		$(srcdir)/generic/tip445.h \
+		$(srcdir)/generic/names.c \
+		$(srcdir)/generic/names.h \
 		$(srcdir)/generic/int2ptr_ptr2int.h \
 		$(DIST_DIR)/generic/
 

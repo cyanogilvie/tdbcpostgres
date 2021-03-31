@@ -2620,12 +2620,59 @@ DeleteConnection(
     if (cdata->statements) {
 	he = Tcl_FirstHashEntry(cdata->statements, &search);
 	if (he) {
-	    Tcl_Obj*	remaining = Tcl_NewObj();
+	    StatementData*	sdata = NULL;
+	    int			stillRemain = 0;
 
 	    do {
-		Tcl_AppendObjToObj(remaining, Tcl_GetHashValue(he));
+		sdata = Tcl_GetHashValue(he);
+		if (sdata->cdata == NULL) {
+		    /*
+		     * A frozen statement, just free it.  Can arrive here if
+		     * the last pgStatement literal is deleted during
+		     * interpreter exit, causing the cdata refcount to go to 0.
+		     * Destructor should be run but isn't, so we're left with
+		     * frozen statements in cdata->statements.
+		     * cdata->pgPtr is going to be closed anyway, so skip the
+		     * UnallocateStatement step (which would cause problems
+		     * with refcounting cdata)
+		     */
+		    if (sdata->stmtName) {
+			/* NULLing stmtName causes the UnallocateStatement
+			 * to be skipped */
+			ckfree(sdata->stmtName);
+			sdata->stmtName = NULL;
+		    }
+
+		    /*
+		     * These are frozen (char* rather than Tcl_Obj*), so
+		     * free them directly to prevent DeleteStatement from
+		     * trying to DecrRefing them
+		     */
+		    if (sdata->subVars) {
+			ckfree(sdata->subVars);
+			sdata->subVars = NULL;
+		    }
+		    if (sdata->nativeSql) {
+			ckfree(sdata->nativeSql);
+			sdata->nativeSql = NULL;
+		    }
+		    if (sdata->columnNames) {
+			ckfree(sdata->columnNames);
+			sdata->columnNames = NULL;
+		    }
+
+		    DeleteStatement(sdata);
+		    sdata = NULL;
+		    Tcl_DeleteHashEntry(he);
+		    he = NULL;
+		} else {
+		    stillRemain++;
+		}
 	    } while((he = Tcl_NextHashEntry(&search)));
-	    Tcl_Panic("No entries should remain in cdata->statements:", Tcl_GetString(remaining));
+
+	    if (stillRemain > 0) {
+		Tcl_Panic("No entries should remain in cdata->statements");
+	    }
 	}
 
 	DBG("DeleteHashTable %s ->statements %s\n", name(cdata), name(cdata->statements));
