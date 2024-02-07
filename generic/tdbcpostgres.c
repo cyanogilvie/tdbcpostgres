@@ -3509,12 +3509,12 @@ RemoveAllStatementRefs(
 ) {
     struct pgStatementRef* p = sdata->pgStatements;
     struct pgStatementRef* n = NULL;
-    Tcl_ObjIntRep* ir = NULL;
+    Tcl_ObjInternalRep* ir = NULL;
 
     sdata->pgStatements = NULL;
 
     while (p) {
-	ir = Tcl_FetchIntRep(p->obj, &pgStatementType);
+	ir = Tcl_FetchInternalRep(p->obj, &pgStatementType);
 	if (ir) {
 	    if (ir->twoPtrValue.ptr1) {
 		DBG("\t  Unlinking pgStatement Tcl_Obj %s from %s/%s\n", name(p->obj), name(sdata->cdata), name(sdata));
@@ -3549,7 +3549,7 @@ static void
 FreeStatement(
     Tcl_Obj* obj
 ) {
-    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(obj, &pgStatementType);
+    Tcl_ObjInternalRep* ir = Tcl_FetchInternalRep(obj, &pgStatementType);
     StatementData* sdata = ir->twoPtrValue.ptr1;
 
     DBG("FreeIntRep on pgStatement %s\n", name(obj));
@@ -3582,11 +3582,11 @@ DupStatement(
     Tcl_Obj* src,
     Tcl_Obj* dup
 ) {
-    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(src, &pgStatementType);
+    Tcl_ObjInternalRep* ir = Tcl_FetchInternalRep(src, &pgStatementType);
     StatementData* sdata = ir->twoPtrValue.ptr1;
 
     AddStatementRef(dup, sdata);
-    Tcl_StoreIntRep(dup, &pgStatementType, ir);
+    Tcl_StoreInternalRep(dup, &pgStatementType, ir);
 }
 
 /*
@@ -3606,7 +3606,7 @@ static void
 UpdateStringOfStatement(
     Tcl_Obj* obj
 ) {
-    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(obj, &pgStatementType);
+    Tcl_ObjInternalRep* ir = Tcl_FetchInternalRep(obj, &pgStatementType);
     StatementData* sdata = ir->twoPtrValue.ptr1;
 
     Tcl_InitStringRep(obj, sdata->origSql, strlen(sdata->origSql));
@@ -3649,8 +3649,8 @@ GetPgStatementFromObj(
     ConnectionData* cdata,
     StatementData** sdataOut
 ) {
-    Tcl_ObjIntRep* ir = Tcl_FetchIntRep(obj, &pgStatementType);
-    Tcl_ObjIntRep newIr;
+    Tcl_ObjInternalRep* ir = Tcl_FetchInternalRep(obj, &pgStatementType);
+    Tcl_ObjInternalRep newIr;
     StatementData* sdata = NULL;
     Tcl_Obj* tokens = NULL;	/* The tokens of the statement to be prepared */
     int tokenc;			/* Length of the 'tokens' list */
@@ -3834,7 +3834,7 @@ GetPgStatementFromObj(
 
     newIr.twoPtrValue.ptr1 = sdata;
     newIr.twoPtrValue.ptr2 = cdata->pgPtr;
-    Tcl_StoreIntRep(obj, &pgStatementType, &newIr);
+    Tcl_StoreInternalRep(obj, &pgStatementType, &newIr);
 
     /* Add a ref for our intrep */
 
